@@ -1,0 +1,123 @@
+{
+  "login_username": {
+    "web": { "name": "login_username", "testId": "username", "role": "textbox", "text": "Username" },
+    "flutter": { "name": "login_username", "testId": "username_input", "semanticsLabel": "Username input" }
+  },
+  "login_password": {
+    "web": { "name": "login_password", "testId": "password", "role": "textbox", "text": "Password" },
+    "flutter": { "name": "login_password", "testId": "password_input", "semanticsLabel": "Password input" }
+  },
+  "login_button": {
+    "web": { "name": "login_button", "testId": "login-btn", "role": "button", "text": "Log In" },
+    "flutter": { "name": "login_button", "testId": "login_button", "text": "Log In", "semanticsLabel": "Login button" }
+  },
+  "join_now_button": {
+    "web": { "name": "join_now_button", "testId": "join-now", "role": "button", "text": "Join Now" },
+    "flutter": { "name": "join_now_button", "testId": "join_now_button", "text": "Join Now", "semanticsLabel": "Join now button" }
+  },
+  "slots_game": {
+    "web": { "name": "slots_game", "testId": "slots-game", "role": "link", "text": "Mega Slots" },
+    "flutter": { "name": "slots_game", "testId": "slots_game", "text": "Mega Slots" }
+  },
+  "blackjack_game": {
+    "web": { "name": "blackjack_game", "testId": "blackjack-game", "role": "link", "text": "Blackjack Pro" },
+    "flutter": { "name": "blackjack_game", "testId": "blackjack_game", "text": "Blackjack Pro" }
+  },
+  "spin_button": {
+    "web": { 
+      "name": "spin_button", 
+      "testId": "spin-btn", 
+      "role": "button", 
+      "text": "SPIN",
+      "screen": "Slots"
+    },
+    "flutter": { 
+      "name": "spin_button", 
+      "testId": "spin_button", 
+      "text": "SPIN",
+      "semanticsLabel": "Spin button"
+    }
+  },
+  "bet_plus_button": {
+    "web": { 
+      "name": "bet_plus_button", 
+      "testId": "bet-plus", 
+      "role": "button", 
+      "text": "+",
+      "screen": "Slots"
+    },
+    "flutter": { 
+      "name": "bet_plus_button", 
+      "testId": "bet_plus", 
+      "text": "+"
+    }
+  },
+  "bet_minus_button": {
+    "web": { 
+      "name": "bet_minus_button", 
+      "testId": "bet-minus", 
+      "role": "button", 
+      "text": "-",
+      "screen": "Slots"
+    },
+    "flutter": { 
+      "name": "bet_minus_button", 
+      "testId": "bet_minus", 
+      "text": "-"
+    }
+  },
+  "hit_button": {
+    "web": { 
+      "name": "hit_button", 
+      "testId": "hit-btn", 
+      "role": "button", 
+      "text": "HIT",
+      "screen": "Blackjack"
+    },
+    "flutter": { 
+      "name": "hit_button", 
+      "testId": "hit_button", 
+      "text": "HIT",
+      "semanticsLabel": "Hit button"
+    }
+  },
+  "stand_button": {
+    "web": { 
+      "name": "stand_button", 
+      "testId": "stand-btn", 
+      "role": "button", 
+      "text": "STAND",
+      "screen": "Blackjack"
+    },
+    "flutter": { 
+      "name": "stand_button", 
+      "testId": "stand_button", 
+      "text": "STAND",
+      "semanticsLabel": "Stand button"
+    }
+  },
+  "deal_button": {
+    "web": { 
+      "name": "deal_button", 
+      "testId": "deal-btn", 
+      "role": "button", 
+      "text": "DEAL",
+      "screen": "Blackjack"
+    },
+    "flutter": { 
+      "name": "deal_button", 
+      "testId": "deal_button", 
+      "text": "DEAL",
+      "semanticsLabel": "Deal button"
+    }
+  },
+  "balance_display": {
+    "web": { "name": "balance_display", "testId": "balance-display", "role": "status" },
+    "flutter": { "name": "balance_display", "testId": "balance_display", "semanticsLabel": "Balance" }
+  },
+  "back_button": {
+    "web": { "name": "back_button", "testId": "back-to-lobby", "role": "button", "text": "Back to Lobby" },
+    "flutter": { "name": "back_button", "testId": "back_button", "text": "Back" }
+  }
+}
+

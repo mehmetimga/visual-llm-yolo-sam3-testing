@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  # Ollama - Local Visual LLM Runtime
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai-ui-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+    # Pull required models after start:
+    # docker exec -it ai-ui-ollama ollama pull minicpm-v
+    # docker exec -it ai-ui-ollama ollama pull llava
+
+  # Qdrant - Vector Database for Visual Memory
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ai-ui-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    environment:
+      - QDRANT__LOG_LEVEL=INFO
+
+  # YOLO Detector Service
+  detector:
+    build:
+      context: ./services/detector
+      dockerfile: Dockerfile
+    container_name: ai-ui-detector
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./apps/orchestrator/out:/app/out:ro
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # DINOv2 Embedding Service
+  dinov3:
+    build:
+      context: ./services/dinov3
+      dockerfile: Dockerfile
+    container_name: ai-ui-dinov3
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./apps/orchestrator/out:/app/out:ro
+      - dinov3_cache:/root/.cache
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  # SAM Segmentation Service
+  sam3:
+    build:
+      context: ./services/sam3
+      dockerfile: Dockerfile
+    container_name: ai-ui-sam3
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./apps/orchestrator/out:/app/out
+      - sam3_cache:/root/.cache
+      - sam3_models:/models
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+volumes:
+  ollama_data:
+  qdrant_data:
+  dinov3_cache:
+  sam3_cache:
+  sam3_models:
+
+networks:
+  default:
+    name: ai-ui-network
