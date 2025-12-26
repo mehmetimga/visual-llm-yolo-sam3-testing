@@ -1,0 +1,11 @@
+# Flutter UI Detection Dataset Configuration
+path: /app/training_data
+train: images
+val: images  # Will use same for now, can split later
+
+# Class definitions matching your labeled data (from classes.txt)
+names:
+  0: back      # Back navigation buttons
+  1: logout    # Logout buttons
+  2: games     # Game elements, cards, controls
+  3: button    # General buttons (PLAY NOW, LOG IN, SPIN, etc.)

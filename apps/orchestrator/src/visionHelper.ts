@@ -70,13 +70,16 @@ export async function visionFallback(
     }
     
     // Step 2: Try Visual LLM if detector didn't find it
+    console.log(`   🤖 Asking MiniCPM-V to locate "${targetText}"...`);
     const vlmResult = await askVlm(screenshotPath, targetText, config);
-    
+
     if (vlmResult.success && vlmResult.clickPoint) {
-      console.log(`   ✅ VLM found "${targetText}" at (${vlmResult.clickPoint.x}, ${vlmResult.clickPoint.y})`);
+      console.log(`   ✅ VLM (MiniCPM-V) found "${targetText}" at (${vlmResult.clickPoint.x}, ${vlmResult.clickPoint.y}) [confidence: ${vlmResult.confidence}]`);
       return vlmResult;
+    } else {
+      console.log(`   ⚠️ VLM could not locate "${targetText}" - ${vlmResult.details}`);
     }
-    
+
     // Step 3: Hardcoded fallback for known elements (demo purposes)
     const hardcodedResult = getHardcodedFallback(targetText);
     if (hardcodedResult.success) {
@@ -149,47 +152,67 @@ async function askVlm(
   try {
     const imageBuffer = readFileSync(screenshotPath);
     const base64Image = imageBuffer.toString('base64');
-    
-    const prompt = `You are a UI automation assistant. Look at this screenshot and find the element that matches: "${targetText}".
-    
-Return ONLY a JSON object with the click coordinates:
-{"x": <number>, "y": <number>, "confidence": <0-1>}
 
-If you cannot find the element, return: {"error": "not found"}`;
+    const prompt = `Find the UI element "${targetText}" in this screenshot.
 
-    const response = await fetch(`${config.ollamaBaseUrl}/api/generate`, {
+IMPORTANT: You MUST respond with ONLY a JSON object, nothing else.
+
+If you find the element, return:
+{"x": <pixel_x>, "y": <pixel_y>, "confidence": <0.0-1.0>}
+
+If you cannot find it, return:
+{"error": "not found"}
+
+Example responses:
+{"x": 640, "y": 400, "confidence": 0.9}
+{"error": "not found"}
+
+Your JSON response:`;
+
+    // Use /api/chat endpoint with messages format (required for vision models)
+    const response = await fetch(`${config.ollamaBaseUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: config.ollamaModel,
-        prompt,
-        images: [base64Image],
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+            images: [base64Image]
+          }
+        ],
         stream: false
       })
     });
     
     if (!response.ok) {
-      return { success: false, method: 'vlm', details: 'VLM request failed' };
+      const errorText = await response.text();
+      console.log(`   ⚠️ VLM HTTP ${response.status}: ${errorText}`);
+      return { success: false, method: 'vlm', details: `VLM request failed: ${response.status}` };
     }
-    
-    const result = await response.json() as { response: string };
-    const parsed = parseVlmResponse(result.response);
-    
+
+    const result = await response.json() as { message?: { content: string }, response?: string };
+    const responseText = result.message?.content || result.response || '';
+    console.log(`   📄 VLM response: ${responseText.substring(0, 200)}`);
+    const parsed = parseVlmResponse(responseText);
+
     if (parsed.x && parsed.y) {
       return {
         success: true,
         clickPoint: { x: parsed.x, y: parsed.y },
         method: 'vlm',
         confidence: parsed.confidence || 0.7,
-        details: 'Found by Visual LLM'
+        details: 'Found by Visual LLM (MiniCPM-V)'
       };
     }
-    
-    return { success: false, method: 'vlm', details: 'VLM could not find element' };
-    
-  } catch {
+
+    return { success: false, method: 'vlm', details: `VLM response did not contain coordinates: ${responseText.substring(0, 100)}` };
+
+  } catch (err) {
     // VLM service not available
-    return { success: false, method: 'vlm', details: 'VLM service unavailable' };
+    console.log(`   ⚠️ VLM error: ${err}`);
+    return { success: false, method: 'vlm', details: `VLM service unavailable: ${err}` };
   }
 }
 
