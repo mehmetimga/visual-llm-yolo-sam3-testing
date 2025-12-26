@@ -583,39 +583,84 @@ async function executeAppiumAction(
     case 'tap': {
       const targetName = step.target?.name || '';
       const targetText = step.target?.text || targetName;
-      
+
+      // IMPORTANT: Ensure keyboard is dismissed before tapping buttons
+      // The first tap might just dismiss the keyboard, not actually tap the button
+      try {
+        const doneBtn = await driver.$('~Done');
+        if (await doneBtn.isExisting()) {
+          await doneBtn.click();
+          console.log(`   ⌨️ Dismissed keyboard before tapping`);
+          await driver.pause(800); // Wait for keyboard to fully dismiss
+        }
+      } catch {}
+
       // Try to find element by accessibility ID first
       let element = null;
-      
+      let tapped = false;
+
       try {
         // Try accessibility ID (Flutter Key becomes accessibility ID)
         element = await driver.$(`~${targetName}`);
         if (await element.isExisting()) {
           await element.click();
           console.log(`   ✅ Tapped via accessibility ID: ${targetName}`);
-          break;
+          tapped = true;
         }
       } catch {}
 
-      // Try to find by text
-      try {
-        element = await driver.$(`//*[contains(@label, "${targetText}") or contains(@name, "${targetText}")]`);
-        if (await element.isExisting()) {
-          await element.click();
-          console.log(`   ✅ Tapped via text: ${targetText}`);
-          break;
-        }
-      } catch {}
+      if (!tapped) {
+        // Try to find by text in label
+        try {
+          element = await driver.$(`//*[contains(@label, "${targetText}") or contains(@name, "${targetText}")]`);
+          if (await element.isExisting()) {
+            await element.click();
+            console.log(`   ✅ Tapped via text: ${targetText}`);
+            tapped = true;
+          }
+        } catch {}
+      }
 
-      // Try predicate string for iOS
-      try {
-        element = await driver.$(`-ios predicate string:label CONTAINS "${targetText}" OR name CONTAINS "${targetText}"`);
-        if (await element.isExisting()) {
-          await element.click();
-          console.log(`   ✅ Tapped via predicate: ${targetText}`);
-          break;
-        }
-      } catch {}
+      if (!tapped) {
+        // Try XCUIElementTypeButton with label or name (case-sensitive)
+        try {
+          element = await driver.$(`//XCUIElementTypeButton[@label="${targetText}" or @name="${targetText}"]`);
+          if (await element.isExisting()) {
+            await element.click();
+            console.log(`   ✅ Tapped button via XPath: ${targetText}`);
+            tapped = true;
+          }
+        } catch {}
+      }
+
+      if (!tapped && targetText) {
+        // Try uppercase version (Flutter buttons often use uppercase text)
+        const upperText = targetText.toUpperCase();
+        try {
+          element = await driver.$(`//XCUIElementTypeButton[@label="${upperText}" or @name="${upperText}"]`);
+          if (await element.isExisting()) {
+            await element.click();
+            console.log(`   ✅ Tapped button via XPath (uppercase): ${upperText}`);
+            tapped = true;
+          }
+        } catch {}
+      }
+
+      if (!tapped) {
+        // Try predicate string for iOS
+        try {
+          element = await driver.$(`-ios predicate string:label CONTAINS "${targetText}" OR name CONTAINS "${targetText}"`);
+          if (await element.isExisting()) {
+            await element.click();
+            console.log(`   ✅ Tapped via predicate: ${targetText}`);
+            tapped = true;
+          }
+        } catch {}
+      }
+
+      if (tapped) {
+        break;
+      }
 
       // Fall back to coordinates using vision or hardcoded positions
       const screenshot = await driver.takeScreenshot();
@@ -673,40 +718,109 @@ async function executeAppiumAction(
       
       try {
         if (isUsername || isPassword) {
-          const pos = isUsername ? fieldPositions.username : fieldPositions.password;
-          
-          // Tap on the field to focus it
-          await driver.action('pointer')
-            .move({ x: pos.x, y: pos.y })
-            .down()
-            .up()
-            .perform();
-          console.log(`   📍 Tapped at (${pos.x}, ${pos.y}) to focus ${isUsername ? 'username' : 'password'} field`);
-          
-          await driver.pause(800); // Wait for keyboard to appear
-          
-          // Now find the focused text field and type into it
-          const elements = await driver.$$('XCUIElementTypeTextField');
-          for (const el of elements) {
-            try {
-              const isFocused = await el.getAttribute('hasFocus');
-              const label = await el.getAttribute('label');
-              // Type into any text field that might be focused
-              await el.setValue(text);
-              typed = true;
-              console.log(`   ✅ Typed "${text}" into field (label: ${label})`);
-              break;
-            } catch {
-              // Try next element
+          // First, dismiss any existing keyboard to reset coordinate system and make all fields accessible
+          try {
+            const doneBtn = await driver.$('~Done');
+            if (await doneBtn.isExisting()) {
+              await doneBtn.click();
+              await driver.pause(800); // Wait longer for keyboard to fully dismiss
             }
-          }
-          
-          // If still not typed, use keyboard directly
-          if (!typed) {
-            // The keyboard should be visible, send keys directly
-            await driver.keys(text.split(''));
-            typed = true;
-            console.log(`   ✅ Typed "${text}" via keyboard`);
+          } catch {}
+
+          // Find the correct field by matching its label attribute
+          const targetLabel = isPassword ? 'Password' : 'Username';
+
+          // Try multiple times to find and interact with the field
+          let attempts = 3;
+          while (attempts > 0 && !typed) {
+            try {
+              // Re-find all TextFields each attempt to avoid stale references
+              const allTextFields = await driver.$$('XCUIElementTypeTextField');
+              console.log(`   🔍 Found ${allTextFields.length} TextFields (looking for "${targetLabel}")`);
+
+              let targetElement = null;
+
+              // Find the field by matching label
+              for (const field of allTextFields) {
+                try {
+                  const label = await field.getAttribute('label');
+                  if (label === targetLabel) {
+                    targetElement = field;
+                    console.log(`   📍 Found field by label: "${label}"`);
+                    break;
+                  }
+                } catch {}
+              }
+
+              if (!targetElement) {
+                console.log(`   ⚠️ Could not find field with label "${targetLabel}"`);
+                break;
+              }
+
+              // Click the field to focus it first
+              await targetElement.click();
+              await driver.pause(1000); // Wait for keyboard to appear
+
+              // Clear ALL existing content by checking length and deleting only what's needed
+              // This handles multiple accumulated entries efficiently
+              try {
+                // Get current field value to know how much to delete
+                const currentValue = await targetElement.getAttribute('value');
+                const charsToDelete = currentValue ? currentValue.length : 0;
+
+                if (charsToDelete > 0) {
+                  console.log(`   🧹 Clearing ${charsToDelete} characters...`);
+
+                  // Move cursor to end of text using Cmd+Right Arrow
+                  await driver.performActions([{
+                    type: 'key',
+                    id: 'keyboard',
+                    actions: [
+                      { type: 'keyDown', value: '\uE03D' }, // Command key
+                      { type: 'keyDown', value: '\uE014' }, // Right arrow
+                      { type: 'keyUp', value: '\uE014' },
+                      { type: 'keyUp', value: '\uE03D' },
+                    ]
+                  }]);
+                  await driver.pause(100);
+
+                  // Delete only the number of characters that exist
+                  for (let i = 0; i < charsToDelete; i++) {
+                    await driver.keys(['\uE003']); // Backspace key
+                  }
+                  await driver.pause(100);
+                  console.log(`   🧹 Field cleared successfully`);
+                } else {
+                  console.log(`   🧹 Field already empty`);
+                }
+              } catch (err) {
+                console.log(`   ⚠️ Error clearing field: ${err}`);
+              }
+
+              await driver.pause(300);
+
+              // Now type the new text via keyboard
+              // Send each character properly with keyDown/keyUp to avoid WebDriverAgent errors
+              for (const char of text) {
+                await driver.keys([char]);
+                await driver.pause(50);
+              }
+              typed = true;
+              console.log(`   ✅ Typed "${text}" into ${targetLabel} field`);
+              await driver.pause(300);
+              break;
+
+            } catch (err: any) {
+              attempts--;
+              const errMsg = err?.toString() || '';
+              if (errMsg.includes('stale') && attempts > 0) {
+                console.log(`   ⚠️ Stale element, retrying (${attempts} attempts left)...`);
+                await driver.pause(500);
+              } else {
+                console.log(`   ⚠️ Could not interact with field: ${err}`);
+                break;
+              }
+            }
           }
           
           // Dismiss keyboard

@@ -17,11 +17,11 @@
   },
   "slots_game": {
     "web": { "name": "slots_game", "testId": "slots-game", "role": "link", "text": "Mega Slots" },
-    "flutter": { "name": "slots_game", "testId": "slots_game", "text": "Mega Slots" }
+    "flutter": { "name": "slots_game", "testId": "slots_play_button", "text": "PLAY NOW", "semanticsLabel": "Play Mega Slots" }
   },
   "blackjack_game": {
     "web": { "name": "blackjack_game", "testId": "blackjack-game", "role": "link", "text": "Blackjack Pro" },
-    "flutter": { "name": "blackjack_game", "testId": "blackjack_game", "text": "Blackjack Pro" }
+    "flutter": { "name": "blackjack_game", "testId": "blackjack_play_button", "text": "PLAY NOW", "semanticsLabel": "Play Blackjack" }
   },
   "spin_button": {
     "web": { 

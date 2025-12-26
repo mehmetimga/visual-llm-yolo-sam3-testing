@@ -7,7 +7,7 @@ Feature: Casino Game Interactions
   Scenario: Play slots with canvas-based spin button
     Given I am on the login page
     When I type "demo" into "login_username"
-    And I type "password123" into "login_password"
+    And I type "pw" into "login_password"
     And I tap "login_button"
     Then I should see text "Casino Lobby"
     When I tap "slots_game"
@@ -21,7 +21,7 @@ Feature: Casino Game Interactions
   Scenario: Adjust bet in slots using canvas controls
     Given I am on the login page
     When I type "demo" into "login_username"
-    And I type "password123" into "login_password"
+    And I type "pw" into "login_password"
     And I tap "login_button"
     When I tap "slots_game"
     Then I should see text "MEGA SLOTS"
@@ -36,7 +36,7 @@ Feature: Casino Game Interactions
   Scenario: Play blackjack game
     Given I am on the login page
     When I type "demo" into "login_username"
-    And I type "password123" into "login_password"
+    And I type "pw" into "login_password"
     And I tap "login_button"
     When I tap "blackjack_game"
     Then I should see text "BLACKJACK"
@@ -50,7 +50,7 @@ Feature: Casino Game Interactions
   Scenario: Navigate back from game to lobby
     Given I am on the login page
     When I type "demo" into "login_username"
-    And I type "password123" into "login_password"
+    And I type "pw" into "login_password"
     And I tap "login_button"
     When I tap "slots_game"
     Then I should see text "MEGA SLOTS"
