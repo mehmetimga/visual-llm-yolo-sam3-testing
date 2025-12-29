@@ -41,6 +41,10 @@ services:
       - "8001:8001"
     volumes:
       - ./apps/orchestrator/out:/app/out:ro
+      - ./services/detector/training_data:/app/training_data
+      - detector_models:/app/runs
+    environment:
+      - YOLO_MODEL_PATH=/app/runs/flutter_ui_v1/weights/best.pt
     restart: unless-stopped
     deploy:
       resources:
@@ -88,6 +92,7 @@ volumes:
   dinov3_cache:
   sam3_cache:
   sam3_models:
+  detector_models:
 
 networks:
   default:

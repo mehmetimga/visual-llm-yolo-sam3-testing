@@ -139,3 +139,16 @@ Feature: Flutter Casino Comprehensive UI Tests
     And I tap "hit_button"
     And I tap "hit_button"
     Then "deal_button" should be visible
+
+  Scenario: Navigate and logout
+    Given I am on the login page
+    When I type "demo" into "login_username"
+    And I type "pw" into "login_password"
+    And I tap "login_button"
+    Then I should see text "Casino Lobby"
+    When I tap "slots_game"
+    Then I should see text "MEGA SLOTS"
+    When I tap "back_button"
+    Then I should see text "Casino Lobby"
+    When I tap "logout_button"
+    Then I should see text "MEGA CASINO"

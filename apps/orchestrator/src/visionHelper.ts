@@ -42,14 +42,17 @@ export async function visionFallback(
   try {
     // Step 1: Try YOLO detector
     const detections = await detectWithYolo(screenshotPath, config.detectorUrl);
-    
+
     if (detections.length > 0) {
+      // Log what YOLO detected
+      console.log(`   🔎 YOLO detections: ${detections.map(d => `${d.type}(conf:${d.confidence?.toFixed(2)})`).join(', ')}`);
+
       // Find best match for target text
       const match = findBestMatch(detections, targetText);
-      
+
       if (match) {
         let clickPoint = getCenterPoint(match.bbox);
-        
+
         // Try SAM-3 for precise segmentation if available
         if (config.sam3Url) {
           const refinedPoint = await refineWithSam3(screenshotPath, match.bbox, config.sam3Url);
@@ -57,15 +60,17 @@ export async function visionFallback(
             clickPoint = refinedPoint;
           }
         }
-        
-        console.log(`   ✅ Vision found "${targetText}" at (${clickPoint.x}, ${clickPoint.y})`);
+
+        console.log(`   ✅ YOLO matched "${targetText}" to type="${match.type}" at (${clickPoint.x}, ${clickPoint.y})`);
         return {
           success: true,
           clickPoint,
           method: 'detector',
           confidence: match.confidence,
-          details: `Detected ${match.type} with text "${match.text}"`
+          details: `Detected ${match.type} (confidence: ${match.confidence?.toFixed(2)})`
         };
+      } else {
+        console.log(`   ⚠️ YOLO found elements but none matched "${targetText}"`);
       }
     }
     
@@ -238,20 +243,24 @@ function findBestMatch(
   targetText: string
 ): DetectedElement | null {
   const target = targetText.toLowerCase();
-  
+
   // Score each detection
   let bestMatch: DetectedElement | null = null;
   let bestScore = 0;
-  
+
   for (const det of detections) {
     const detText = (det.text || det.type || '').toLowerCase();
-    
+
     // Calculate similarity score
     let score = 0;
-    
-    // Exact match
+
+    // Exact match on text or type
     if (detText === target) {
       score = 1.0;
+    }
+    // Type match (e.g., YOLO detected "back" and we're looking for "back" button)
+    else if (det.type && (target.includes(det.type) || det.type.includes(target))) {
+      score = 0.9;  // High score for type match
     }
     // Contains match
     else if (detText.includes(target) || target.includes(detText)) {
@@ -261,17 +270,29 @@ function findBestMatch(
     else if (target.split(/\s+/).some(word => detText.includes(word))) {
       score = 0.5;
     }
-    
+    // Partial word match (e.g., "back" in "back_button")
+    else if (target.split('_').some(part => detText.includes(part))) {
+      score = 0.6;
+    }
+    // Generic button class - if YOLO detected "button", accept it for button-like targets
+    else if (det.type === 'button') {
+      // Common button text patterns
+      const buttonKeywords = ['back', 'login', 'log in', 'play', 'spin', 'deal', 'hit', 'stand', 'join', 'logout', 'bet'];
+      if (buttonKeywords.some(kw => target.includes(kw))) {
+        score = 0.4;  // Generic button match
+      }
+    }
+
     // Boost by confidence
-    score *= det.confidence;
-    
+    score *= (det.confidence || 0.5);
+
     if (score > bestScore) {
       bestScore = score;
       bestMatch = det;
     }
   }
-  
-  return bestScore > 0.3 ? bestMatch : null;
+
+  return bestScore > 0.15 ? bestMatch : null;  // Lower threshold to catch more matches
 }
 
 /**
