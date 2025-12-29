@@ -19,6 +19,8 @@
 - Node.js 20+
 - pnpm 8+
 - Docker (for ML services)
+- Flutter SDK (for mobile testing)
+- Appium 3.x (for mobile automation)
 
 ### Installation
 
@@ -26,40 +28,86 @@
 # Install dependencies
 pnpm install
 
-# Install Playwright browsers
+# Build all packages
+pnpm build
+
+# Install Playwright browsers (for web testing)
 pnpm exec playwright install chromium
 
 # Copy environment file
 cp env.example .env
 ```
 
+## Web Testing
+
 ### Start Demo Web App
 
 ```bash
-# Start the demo web app
 pnpm dev:web
-
-# The app will be available at http://localhost:3000
+# App runs at http://localhost:3000
 # Demo credentials: demo / password123
 ```
 
-### Running Tests
+### Run Web Tests
 
 ```bash
-# Run BDD spec on web platform (mock mode)
+# Mock mode (no browser)
 pnpm test -- --spec specs/lobby_login.feature --platform web
 
-# Run with REAL browser (headless)
+# Real browser (headless)
 pnpm test -- --spec specs/lobby_login.feature --platform web --real
 
-# Run with REAL browser (visible)
+# Real browser (visible)
 pnpm test -- --spec specs/lobby_login.feature --platform web --real --headed
 
-# Run casino game test with vision fallback
+# With vision services
 pnpm test -- --spec specs/casino_game.feature --platform web --real --vgs
+```
 
-# Run English test
-pnpm test -- --english "Open the app, login as demo, go to lobby, verify Join Now visible" --platform web --real
+## Mobile Testing (Flutter + Appium)
+
+### 1. Start iOS Simulator & Flutter App
+
+```bash
+# Open iOS Simulator
+open -a Simulator
+
+# Start Flutter app
+cd apps/demo-flutter
+flutter run -d <DEVICE_ID>
+```
+
+### 2. Start Appium Server
+
+```bash
+# Install Appium (if not installed)
+npm install -g appium
+appium driver install xcuitest
+
+# Start Appium with clean PATH (avoids conda conflicts)
+env -i HOME="$HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:$HOME/.npm-global/bin" \
+  appium --port 4723 &
+
+# Verify
+curl http://localhost:4723/status
+```
+
+### 3. Run Mobile Tests
+
+```bash
+# Run full test (login + games)
+pnpm test -- --spec specs/flutter_full.feature --platform flutter --real --vgs
+
+# Run lobby test (if already logged in)
+pnpm test -- --spec specs/flutter_lobby.feature --platform flutter --real --vgs
+```
+
+### 4. Restart App Fresh
+
+```bash
+# Terminate and relaunch (clear previous state)
+xcrun simctl terminate <DEVICE_ID> com.example.demoCasino
+xcrun simctl launch <DEVICE_ID> com.example.demoCasino
 ```
 
 ## Docker Services (ML Stack)
@@ -76,7 +124,7 @@ docker-compose -f docker-compose.local.yml up -d
 # Check service status
 ./scripts/setup-services.sh status
 
-# Pull Ollama vision models (required for VLM-based detection)
+# Pull Ollama vision models
 ./scripts/setup-services.sh pull-models
 ```
 
@@ -96,13 +144,11 @@ docker-compose -f docker-compose.local.yml up -d
 # Test detector
 curl http://localhost:8001/health
 
-# Test with an image
-curl -X POST http://localhost:8001/detect \
-  -H "Content-Type: application/json" \
-  -d '{"image_path": "/app/out/steps/web/step_001.png"}'
-
 # Test SAM-3
 curl http://localhost:8003/health
+
+# Test Ollama
+curl http://localhost:11434/api/tags
 ```
 
 ## Project Structure
@@ -133,8 +179,10 @@ ai-ui-automation/
 │
 ├── specs/
 │   ├── targets.json             # Target definitions per platform
-│   ├── lobby_login.feature      # Login smoke test
-│   └── casino_game.feature      # Casino game vision test
+│   ├── lobby_login.feature      # Login smoke test (web)
+│   ├── casino_game.feature      # Casino game vision test (web)
+│   ├── flutter_full.feature     # Full Flutter test (login + games)
+│   └── flutter_lobby.feature    # Flutter lobby test (post-login)
 │
 ├── scripts/
 │   └── setup-services.sh        # Service management script
@@ -189,8 +237,10 @@ When a locator fails, the system attempts recovery in this order:
 📊 Test Results Summary:
    ✅ [web] Play slots with canvas-based spin button
       Total: 9, Passed: 9, Failed: 0, Healed: 1
-   ✅ [web] Play blackjack game
-      Total: 11, Passed: 11, Failed: 0, Healed: 4
+   ✅ [flutter] Login and play slots
+      Total: 9, Passed: 9, Failed: 0, Healed: 0
+   ✅ [flutter] Login and play blackjack
+      Total: 9, Passed: 9, Failed: 0, Healed: 0
 ```
 
 ## Configuration
@@ -222,7 +272,7 @@ Each test run produces:
 - `out/run.json` - Raw results
 - `out/report.html` - Visual HTML report
 - `out/junit.xml` - CI-compatible JUnit report
-- `out/steps/` - Screenshots per step
+- `out/steps/<platform>/` - Screenshots per step
 
 ## Demo Apps
 
@@ -252,11 +302,35 @@ Options:
   -p, --platform <names>  Platforms: web, flutter, or web,flutter
   -b, --baseUrl <url>     Base URL (default: http://localhost:3000)
   -o, --outDir <path>     Output directory (default: ./out)
-  --real                  Use real browser execution (vs mock)
+  --real                  Use real browser/device execution (vs mock)
   --headed                Run browser in visible mode
   --vgs                   Enable Vision Grounding Service
   --vms                   Enable Visual Memory Service
   --sam3                  Enable SAM-3 Segmentation
+```
+
+## Troubleshooting
+
+### Conda/Miniforge PATH Conflicts
+
+If you see build errors, conda may be interfering. Run with clean PATH:
+
+```bash
+env -i HOME="$HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:$HOME/flutter/bin" \
+  <command>
+```
+
+### Appium Connection Issues
+
+1. Ensure Appium is running: `curl http://localhost:4723/status`
+2. Ensure the app is running on simulator
+3. Use clean PATH when starting Appium
+
+### Port Already in Use
+
+```bash
+lsof -ti:3000 | xargs kill -9  # Web app
+lsof -ti:4723 | xargs kill -9  # Appium
 ```
 
 ## License

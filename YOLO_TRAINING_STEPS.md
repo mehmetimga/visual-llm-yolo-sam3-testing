@@ -2,9 +2,21 @@
 
 ## Current Status
 
+✅ **PoC Tests Working:** Both web and mobile tests pass with hardcoded fallbacks
+✅ **Docker Services Running:** YOLO detector, SAM-3, DINOv3, Ollama, Qdrant
 ✅ **Training data directory created:** `services/detector/training_data/`
-✅ **Images collected:** 3 images (need more for good training)
-❌ **Labels:** Not created yet (THIS IS THE NEXT STEP)
+✅ **Images collected:** Screenshots from test runs available
+⏳ **Labels:** Need to label images for better YOLO detection
+
+## Current Detection Flow
+
+The system currently uses this fallback order:
+1. Native locators (testId, accessibility label, text)
+2. YOLO detector (returns 0 elements without training)
+3. Hardcoded positions (demo mode - currently used)
+4. Visual LLM via Ollama (backup)
+
+**To improve detection, train YOLO with labeled UI screenshots.**
 
 ## Step-by-Step Training Process
 
@@ -225,6 +237,28 @@ cat services/detector/runs/flutter_ui_v1/results.txt
 # - mAP50-95: Should be > 0.5 (50%)
 # - Precision: Should be > 0.8 (80%)
 # - Recall: Should be > 0.7 (70%)
+```
+
+## Available Screenshots for Training
+
+Current test runs have generated screenshots:
+
+**Flutter (Mobile):** `apps/orchestrator/out/steps/flutter/`
+- 17 screenshots (login, lobby, slots, blackjack screens)
+
+**Web:** `apps/orchestrator/out/steps/web/`
+- 11 screenshots (login, lobby, game screens)
+
+Copy these to training directory:
+```bash
+# Copy Flutter screenshots
+cp apps/orchestrator/out/steps/flutter/*.png services/detector/training_data/images/flutter_
+
+# Copy Web screenshots  
+cp apps/orchestrator/out/steps/web/*.png services/detector/training_data/images/web_
+
+# Check count
+ls services/detector/training_data/images/ | wc -l
 ```
 
 ## Quick Start (With Your Current 3 Images)
