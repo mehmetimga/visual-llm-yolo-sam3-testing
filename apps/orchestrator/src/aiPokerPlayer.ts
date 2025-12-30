@@ -318,13 +318,13 @@ export async function playPokerHand(
   
   console.log(`\n   ========== POKER HAND #${handNumber} ==========`);
   
-  // Wait for game to settle
-  await driver.pause(1000);
+  // Quick settle - no long waits needed
+  await driver.pause(200);
   
   // First, check if we need to click DEAL or DEAL AGAIN button (new hand)
   const dealClicked = await clickDealButton(driver);
   if (dealClicked) {
-    await driver.pause(2500);  // Wait for cards to be dealt
+    await driver.pause(800);  // Brief wait for cards to be dealt
   }
   
   let lastDecision: PokerDecision = { action: 'check', reasoning: 'Initial', confidence: 0 };
@@ -333,7 +333,7 @@ export async function playPokerHand(
   
   // Keep playing until hand is complete or we hit max rounds
   let waitCycles = 0;
-  const maxWaitCycles = 30;  // Max time waiting for our turn (30 * 2s = 60s)
+  const maxWaitCycles = 60;  // Max time waiting for our turn (60 * 0.5s = 30s)
   
   while (roundNumber <= maxRoundsPerHand && waitCycles < maxWaitCycles) {
     // Take screenshot of current game state
@@ -353,10 +353,10 @@ export async function playPokerHand(
     if (waitingForOthers) {
       if (waitCycles === 0) {
         console.log(`   ⏳ Waiting for other players...`);
-      } else if (waitCycles % 5 === 0) {
-        console.log(`   ⏳ Still waiting... (${waitCycles * 2}s)`);
+      } else if (waitCycles % 10 === 0) {
+        console.log(`   ⏳ Still waiting... (${waitCycles * 0.5}s)`);
       }
-      await driver.pause(2000);
+      await driver.pause(500);  // Short poll interval when waiting
       waitCycles++;
       continue;
     }
@@ -368,7 +368,7 @@ export async function playPokerHand(
     const hasActionButtons = await hasPokerActionButtons(driver);
     if (!hasActionButtons) {
       console.log(`   ⏳ No action buttons available, waiting...`);
-      await driver.pause(1500);
+      await driver.pause(300);  // Quick check
       
       // Check again if hand ended
       if (await isHandComplete(driver)) {
@@ -387,8 +387,8 @@ export async function playPokerHand(
     // Execute the decision
     await executePokerAction(driver, decision);
     
-    // Wait for game to process and update
-    await driver.pause(2000);
+    // Brief wait for game to process
+    await driver.pause(500);
     
     roundNumber++;
   }
@@ -398,7 +398,7 @@ export async function playPokerHand(
   }
   
   // After hand completes, click DEAL AGAIN to start next hand
-  await driver.pause(1500);
+  await driver.pause(300);
   const dealtAgain = await clickDealButton(driver);
   if (dealtAgain) {
     console.log(`   🔄 Starting next hand...`);
@@ -522,10 +522,12 @@ async function executePokerAction(
   driver: WebdriverIO.Browser,
   decision: PokerDecision
 ): Promise<{ success: boolean; decision: PokerDecision }> {
+  // CHECK and CALL are often the same button position
+  // If no bet to call, button shows "CHECK". If there's a bet, it shows "CALL $X"
   const actionLabels: Record<string, string[]> = {
     fold: ['FOLD', 'Fold'],
-    check: ['CHECK', 'Check'],
-    call: ['CALL', 'Call'],
+    check: ['CHECK', 'Check', 'CALL', 'Call'],  // Try CHECK first, then CALL
+    call: ['CALL', 'Call', 'CHECK', 'Check'],   // Try CALL first, then CHECK (if no bet)
     raise: ['RAISE', 'Raise'],
     all_in: ['ALL IN', 'ALL-IN', 'All In', 'ALLIN'],
   };
@@ -558,8 +560,8 @@ async function executePokerAction(
     clicked = true;
   }
 
-  // Wait for action to process
-  await driver.pause(1500);
+  // Brief wait for action to register
+  await driver.pause(300);
 
   return { success: clicked, decision };
 }
