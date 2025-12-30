@@ -91,18 +91,19 @@ UI_TYPE_MAPPING = {
     "mouse": "icon",
 }
 
-# Poker-specific classes (from poker_model.pt training)
+# Poker-specific classes (from poker_model.pt training v2)
 POKER_CLASSES = {
-    0: "button",
-    1: "card_face",
-    2: "card_back",
-    3: "chip_stack",
-    4: "pot_display",
-    5: "player_badge",
-    6: "slider",
-    7: "community_area",
-    8: "winner_banner",
-    9: "text_label",
+    0: "btn_fold",
+    1: "btn_check_call",
+    2: "btn_raise",
+    3: "btn_all_in",
+    4: "btn_deal_again",
+    5: "winner_banner",
+    6: "hole_card",
+    7: "board_card",
+    8: "pot_amount",
+    9: "card_back",
+    10: "bet_slider",
 }
 
 

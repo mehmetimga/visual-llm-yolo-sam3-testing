@@ -197,6 +197,38 @@ function createStepFromBddMatch(
         meta: { ...baseStep.meta, seconds: parseInt(match.params.seconds, 10) },
       } as Step;
 
+    case 'aiPokerPlay':
+      return {
+        ...baseStep,
+        action: 'aiPokerPlay',
+        meta: { 
+          ...baseStep.meta, 
+          handNumber: match.params.handNumber ? parseInt(match.params.handNumber, 10) : 1,
+          useVision: true 
+        },
+      } as Step;
+
+    case 'aiPokerPlayMultiple':
+      return {
+        ...baseStep,
+        action: 'aiPokerPlayMultiple',
+        meta: { 
+          ...baseStep.meta, 
+          count: parseInt(match.params.count, 10),
+          useVision: true 
+        },
+      } as Step;
+
+    case 'aiCaptureTraining':
+      return {
+        ...baseStep,
+        action: 'aiCaptureTraining',
+        meta: { 
+          ...baseStep.meta, 
+          count: parseInt(match.params.count, 10),
+        },
+      } as Step;
+
     default:
       return null;
   }

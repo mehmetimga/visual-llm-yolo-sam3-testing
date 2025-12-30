@@ -22,13 +22,13 @@ def train_yolo():
         return
     
     # Configuration
-    DATASET_YAML = "training_data/poker_dataset.yaml"
+    DATASET_YAML = "training_data/poker_data.yaml"
     MODEL_NAME = "yolov8n.pt"  # Nano model - fast inference
-    EPOCHS = 50
+    EPOCHS = 100
     IMAGE_SIZE = 640
-    BATCH_SIZE = 8  # Reduce if out of memory
+    BATCH_SIZE = 16  # Larger batch for better training
     PROJECT = "runs"
-    NAME = "poker_ui_v1"
+    NAME = "poker_ui_v2"
     
     # Check dataset
     if not Path(DATASET_YAML).exists():
@@ -143,8 +143,8 @@ def validate_labels():
                     class_id = int(parts[0])
                     coords = [float(x) for x in parts[1:]]
                     
-                    # Check ranges
-                    if class_id < 0 or class_id > 9:
+                    # Check ranges (11 classes: 0-10)
+                    if class_id < 0 or class_id > 10:
                         print(f"   ⚠️ {label_file.name}:{line_num} - Invalid class ID: {class_id}")
                         invalid += 1
                         continue

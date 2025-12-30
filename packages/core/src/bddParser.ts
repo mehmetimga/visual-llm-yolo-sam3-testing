@@ -101,6 +101,11 @@ const STEP_PATTERNS: Array<{ regex: RegExp; pattern: string; params: string[] }>
   { regex: /^I interact with "([^"]+)" element$/, pattern: 'tap_canvas', params: ['element'] },
   { regex: /^the "([^"]+)" should display$/, pattern: 'assertVisible', params: ['target'] },
   { regex: /^I wait (\d+) seconds?$/, pattern: 'wait', params: ['seconds'] },
+  // AI Poker patterns
+  { regex: /^AI plays poker hand (\d+)$/, pattern: 'aiPokerPlay', params: ['handNumber'] },
+  { regex: /^AI plays (\d+) poker hands?$/, pattern: 'aiPokerPlayMultiple', params: ['count'] },
+  { regex: /^AI makes poker decision$/, pattern: 'aiPokerPlay', params: [] },
+  { regex: /^AI captures training data for (\d+) hands?$/, pattern: 'aiCaptureTraining', params: ['count'] },
 ];
 
 export function matchStepPattern(text: string): StepMatch | null {

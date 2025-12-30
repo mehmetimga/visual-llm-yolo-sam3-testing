@@ -15,7 +15,10 @@ export type Action =
   | 'assertVisible'
   | 'assertText'
   | 'assertNotVisible'
-  | 'screenshot';
+  | 'screenshot'
+  | 'aiPokerPlay'
+  | 'aiPokerPlayMultiple'
+  | 'aiCaptureTraining';
 
 export interface TargetHint {
   name: string;                  // canonical name: "login_button"

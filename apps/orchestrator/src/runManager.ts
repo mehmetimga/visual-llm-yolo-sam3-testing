@@ -22,6 +22,8 @@ import {
 } from '@ai-ui/core';
 import type { OrchestratorConfig } from './config.js';
 import { visionFallback } from './visionHelper.js';
+import { playPokerHand, type AIPokerConfig } from './aiPokerPlayer.js';
+import { capturePokerTrainingData } from './dataCapture.js';
 
 export async function runTests(config: OrchestratorConfig): Promise<RunResult[]> {
   const runId = uuid();
@@ -941,6 +943,56 @@ async function executeAppiumAction(
       break;
     }
 
+    case 'aiPokerPlay': {
+      const handNumber = (step.meta?.handNumber as number) || 1;
+      const aiConfig: AIPokerConfig = {
+        detectorUrl: config.detectorUrl,
+        ollamaBaseUrl: config.ollamaBaseUrl,
+        ollamaModel: config.ollamaModel,
+      };
+      
+      const stepsDir = screenshotPath.substring(0, screenshotPath.lastIndexOf('/'));
+      const result = await playPokerHand(driver, aiConfig, handNumber, stepsDir);
+      
+      if (!result.success) {
+        throw new Error(`AI poker play failed for hand ${handNumber}`);
+      }
+      console.log(`   ✅ AI completed poker hand #${handNumber}: ${result.decision.action.toUpperCase()}`);
+      break;
+    }
+
+    case 'aiPokerPlayMultiple': {
+      const count = (step.meta?.count as number) || 5;
+      const aiConfig: AIPokerConfig = {
+        detectorUrl: config.detectorUrl,
+        ollamaBaseUrl: config.ollamaBaseUrl,
+        ollamaModel: config.ollamaModel,
+      };
+      
+      const stepsDir = screenshotPath.substring(0, screenshotPath.lastIndexOf('/'));
+      console.log(`   🎰 AI playing ${count} poker hands...`);
+      
+      for (let i = 1; i <= count; i++) {
+        const result = await playPokerHand(driver, aiConfig, i, stepsDir);
+        console.log(`   ✅ Hand #${i}: ${result.decision.action.toUpperCase()} (${result.decision.reasoning})`);
+        await driver.pause(500);
+      }
+      break;
+    }
+
+    case 'aiCaptureTraining': {
+      const count = (step.meta?.count as number) || 20;
+      console.log(`   📸 Capturing YOLO training data for ${count} hands...`);
+      
+      const result = await capturePokerTrainingData(driver, count, {
+        baseUrl: config.ollamaBaseUrl,
+        model: config.ollamaModel,
+      });
+      
+      console.log(`   ✅ Captured ${result.imagesCapture} images from ${result.handsPlayed} hands`);
+      break;
+    }
+
     default:
       console.log(`   ⚠️ Unknown action: ${step.action}`);
   }
@@ -1067,6 +1119,8 @@ function getFlutterElementPosition(targetName: string): { x: number; y: number }
     // Poker table screen - DEAL button in center of table
     'deal_button': { x: 215, y: 575 },
     'deal': { x: 215, y: 575 },
+    'deal_again': { x: 215, y: 575 },
+    'deal again': { x: 215, y: 575 },
     
     // Poker table screen - action buttons at bottom row (iPhone 16 Pro Max: 430x932)
     // 4 buttons evenly spaced: FOLD | CALL/CHECK | RAISE | ALL IN
