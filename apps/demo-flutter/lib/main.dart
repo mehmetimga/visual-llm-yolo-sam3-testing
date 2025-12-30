@@ -5,6 +5,8 @@ import 'screens/login_screen.dart';
 import 'screens/lobby_screen.dart';
 import 'screens/games/slots_screen.dart';
 import 'screens/games/blackjack_screen.dart';
+import 'screens/games/poker_screen.dart';
+import 'screens/games/poker_table_screen.dart';
 
 void main() {
   runApp(const DemoCasinoApp());
@@ -71,6 +73,8 @@ class DemoCasinoApp extends StatelessWidget {
           '/lobby': (context) => const LobbyScreen(),
           '/games/slots': (context) => const SlotsScreen(),
           '/games/blackjack': (context) => const BlackjackScreen(),
+          '/games/poker': (context) => const PokerScreen(),
+          '/games/poker-table': (context) => const PokerTableScreen(),
         },
       ),
     );

@@ -47,11 +47,19 @@ const games = [
   ),
   GameInfo(
     id: 'poker',
-    name: 'Video Poker',
+    name: 'Texas Hold\'em',
     icon: '🂡',
-    description: 'Play classic video poker!',
+    description: 'Beat the dealer at poker!',
     route: '/games/poker',
     testKey: 'poker_play_button',
+  ),
+  GameInfo(
+    id: 'poker-table',
+    name: 'Poker Table',
+    icon: '🎴',
+    description: 'Play with 3 AI opponents!',
+    route: '/games/poker-table',
+    testKey: 'poker_table_play_button',
   ),
 ];
 
@@ -301,7 +309,9 @@ class GameCard extends StatelessWidget {
                     key: Key(game.testKey),
                     onPressed: () {
                       if (game.route.contains('slots') ||
-                          game.route.contains('blackjack')) {
+                          game.route.contains('blackjack') ||
+                          game.route.contains('poker') ||
+                          game.route.contains('poker-table')) {
                         Navigator.pushNamed(context, game.route);
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
