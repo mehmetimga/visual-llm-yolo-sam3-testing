@@ -466,46 +466,34 @@ class _PokerTableScreenState extends State<PokerTableScreen>
 
   Widget _buildChipStack() {
     return SizedBox(
-      width: 40,
-      height: 24,
+      width: 50,
+      height: 36,
       child: Stack(
         alignment: Alignment.center,
         children: [
           Positioned(
             bottom: 0,
-            child: _buildChip(Colors.red.shade700),
+            child: _buildPokerChip(Colors.red.shade700, 28),
           ),
           Positioned(
-            bottom: 4,
-            left: 6,
-            child: _buildChip(Colors.blue.shade700),
+            bottom: 6,
+            left: 2,
+            child: _buildPokerChip(Colors.blue.shade700, 28),
           ),
           Positioned(
-            bottom: 8,
-            right: 6,
-            child: _buildChip(Colors.green.shade700),
+            bottom: 12,
+            right: 2,
+            child: _buildPokerChip(Colors.green.shade700, 28),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildChip(Color color) {
-    return Container(
-      width: 16,
-      height: 16,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.3),
-            blurRadius: 2,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
+  Widget _buildPokerChip(Color color, double size) {
+    return CustomPaint(
+      size: Size(size, size),
+      painter: _PokerChipPainter(color),
     );
   }
 
@@ -1165,4 +1153,85 @@ class _FeltPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// Realistic poker chip painter
+class _PokerChipPainter extends CustomPainter {
+  final Color color;
+  
+  _PokerChipPainter(this.color);
+  
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+    
+    // Shadow
+    canvas.drawCircle(
+      center + const Offset(1, 2),
+      radius,
+      Paint()..color = Colors.black.withOpacity(0.4),
+    );
+    
+    // Main chip body
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()..color = color,
+    );
+    
+    // Outer white ring
+    canvas.drawCircle(
+      center,
+      radius * 0.92,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = radius * 0.12,
+    );
+    
+    // Edge stripes (casino chip style)
+    final stripePaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = radius * 0.15
+      ..strokeCap = StrokeCap.butt;
+    
+    for (int i = 0; i < 8; i++) {
+      final angle = (i * math.pi / 4);
+      final startX = center.dx + radius * 0.75 * math.cos(angle);
+      final startY = center.dy + radius * 0.75 * math.sin(angle);
+      final endX = center.dx + radius * 0.98 * math.cos(angle);
+      final endY = center.dy + radius * 0.98 * math.sin(angle);
+      canvas.drawLine(Offset(startX, startY), Offset(endX, endY), stripePaint);
+    }
+    
+    // Inner circle
+    canvas.drawCircle(
+      center,
+      radius * 0.55,
+      Paint()..color = color.withOpacity(0.9),
+    );
+    
+    // Inner ring
+    canvas.drawCircle(
+      center,
+      radius * 0.5,
+      Paint()
+        ..color = Colors.white.withOpacity(0.8)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = radius * 0.08,
+    );
+    
+    // Center highlight
+    canvas.drawCircle(
+      center - Offset(radius * 0.15, radius * 0.15),
+      radius * 0.15,
+      Paint()..color = Colors.white.withOpacity(0.3),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => 
+      oldDelegate is _PokerChipPainter && oldDelegate.color != color;
 }
