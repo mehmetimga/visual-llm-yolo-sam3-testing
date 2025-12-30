@@ -100,6 +100,7 @@ const STEP_PATTERNS: Array<{ regex: RegExp; pattern: string; params: string[] }>
   { regex: /^I tap the "([^"]+)" on the game canvas$/, pattern: 'tap_canvas', params: ['element'] },
   { regex: /^I interact with "([^"]+)" element$/, pattern: 'tap_canvas', params: ['element'] },
   { regex: /^the "([^"]+)" should display$/, pattern: 'assertVisible', params: ['target'] },
+  { regex: /^I wait (\d+) seconds?$/, pattern: 'wait', params: ['seconds'] },
 ];
 
 export function matchStepPattern(text: string): StepMatch | null {

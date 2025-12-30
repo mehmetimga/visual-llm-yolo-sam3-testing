@@ -10,6 +10,7 @@ export type Action =
   | 'tap'
   | 'type'
   | 'scroll'
+  | 'wait'
   | 'waitForVisible'
   | 'assertVisible'
   | 'assertText'

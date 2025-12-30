@@ -9,6 +9,7 @@ class GameInfo {
   final String description;
   final String route;
   final String testKey;
+  final String buttonText;
 
   const GameInfo({
     required this.id,
@@ -17,6 +18,7 @@ class GameInfo {
     required this.description,
     required this.route,
     required this.testKey,
+    this.buttonText = 'PLAY NOW',
   });
 }
 
@@ -60,6 +62,7 @@ const games = [
     description: 'Play with 3 AI opponents!',
     route: '/games/poker-table',
     testKey: 'poker_table_play_button',
+    buttonText: 'PLAY POKER',
   ),
 ];
 
@@ -326,9 +329,9 @@ class GameCard extends StatelessWidget {
                       foregroundColor: Colors.black,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    child: const Text(
-                      'PLAY NOW',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                    child: Text(
+                      game.buttonText,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
                 ],

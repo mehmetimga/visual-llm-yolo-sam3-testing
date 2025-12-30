@@ -32,7 +32,18 @@ def get_model():
         try:
             from ultralytics import YOLO
             # Use a pre-trained model or custom UI detection model
-            model_path = os.environ.get("YOLO_MODEL_PATH", "yolov8n.pt")
+            # Priority: YOLO_MODEL_PATH env var > poker_model.pt > yolov8n.pt
+            model_path = os.environ.get("YOLO_MODEL_PATH", None)
+            
+            if model_path is None:
+                # Check for poker-trained model first
+                poker_model = os.path.join(os.path.dirname(__file__), "poker_model.pt")
+                if os.path.exists(poker_model):
+                    model_path = poker_model
+                    logger.info("Using poker-trained model")
+                else:
+                    model_path = "yolov8n.pt"
+            
             model = YOLO(model_path)
             logger.info(f"Loaded YOLO model from {model_path}")
         except Exception as e:
@@ -68,7 +79,7 @@ class DetectResponse(BaseModel):
     count: int
 
 
-# UI element type mapping from COCO classes
+# UI element type mapping from COCO classes (generic YOLO)
 UI_TYPE_MAPPING = {
     "person": None,  # Skip
     "cell phone": "button",
@@ -78,6 +89,20 @@ UI_TYPE_MAPPING = {
     "tv": "container",
     "laptop": "container",
     "mouse": "icon",
+}
+
+# Poker-specific classes (from poker_model.pt training)
+POKER_CLASSES = {
+    0: "button",
+    1: "card_face",
+    2: "card_back",
+    3: "chip_stack",
+    4: "pot_display",
+    5: "player_badge",
+    6: "slider",
+    7: "community_area",
+    8: "winner_banner",
+    9: "text_label",
 }
 
 
@@ -183,6 +208,10 @@ async def detect(request: DetectRequest):
         # Run YOLO detection
         results = detector(image_path, conf=request.conf_threshold)
         
+        # Check if using poker model (class names will be different)
+        is_poker_model = any("button" in str(name).lower() or "card" in str(name).lower() 
+                            for name in (results[0].names.values() if results else []))
+        
         elements = []
         for i, result in enumerate(results):
             if result.boxes is None:
@@ -193,16 +222,23 @@ async def detect(request: DetectRequest):
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
                 confidence = float(box.conf[0])
                 class_id = int(box.cls[0])
-                class_name = result.names.get(class_id, "unknown")
                 
-                # Map to UI element type
-                ui_type = UI_TYPE_MAPPING.get(class_name, "button")
-                if ui_type is None:
-                    continue
+                # Get class name based on model type
+                if is_poker_model or class_id in POKER_CLASSES:
+                    # Using poker-trained model
+                    ui_type = POKER_CLASSES.get(class_id, "unknown")
+                    class_name = ui_type
+                else:
+                    # Using generic COCO model
+                    class_name = result.names.get(class_id, "unknown")
+                    ui_type = UI_TYPE_MAPPING.get(class_name, "button")
+                    if ui_type is None:
+                        continue
                 
                 elements.append(CandidateElement(
                     id=f"el_{i:02d}_{j:02d}",
                     type=ui_type,
+                    text=class_name,  # Include class name as text
                     role=ui_type,
                     bbox=BBox(
                         x=int(x1),

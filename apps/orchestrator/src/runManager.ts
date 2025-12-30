@@ -595,6 +595,24 @@ async function executeAppiumAction(
         }
       } catch {}
 
+      // PRIORITY: For targets with ambiguous text like "PLAY NOW", use hardcoded position FIRST
+      // This ensures we tap the correct game button, not just any PLAY NOW
+      // Note: poker_table_play_button now uses unique "PLAY POKER" text, so removed from list
+      const ambiguousTargets = ['poker_play_button', 'slots_play_button', 
+                                'blackjack_play_button', 'roulette_play_button'];
+      if (ambiguousTargets.includes(targetName)) {
+        const pos = getFlutterElementPosition(targetName);
+        if (pos) {
+          await driver.action('pointer')
+            .move({ x: pos.x, y: pos.y })
+            .down()
+            .up()
+            .perform();
+          console.log(`   🎯 Tapped ${targetName} via hardcoded position at (${pos.x}, ${pos.y})`);
+          break;
+        }
+      }
+
       // Try to find element by accessibility ID first
       let element = null;
       let tapped = false;
@@ -916,6 +934,13 @@ async function executeAppiumAction(
       break;
     }
 
+    case 'wait': {
+      const seconds = (step.meta?.seconds as number) || 1;
+      console.log(`   ⏳ Waiting ${seconds} second(s)...`);
+      await driver.pause(seconds * 1000);
+      break;
+    }
+
     default:
       console.log(`   ⚠️ Unknown action: ${step.action}`);
   }
@@ -1014,6 +1039,10 @@ function getFlutterElementPosition(targetName: string): { x: number; y: number }
     'blackjack_play': { x: 310, y: 450 },
     'roulette': { x: 120, y: 690 },            // PLAY NOW on Roulette card
     'video poker': { x: 310, y: 690 },         // PLAY NOW on Video Poker card
+    'texas_holdem': { x: 310, y: 450 },        // Texas Hold'em (after scroll)
+    'poker_play_button': { x: 310, y: 450 },   // Texas Hold'em PLAY NOW
+    'poker_table': { x: 190, y: 770 },         // Poker Table PLAY NOW button (after scroll)
+    'poker_table_play_button': { x: 190, y: 770 }, // Poker Table PLAY NOW (after scroll - left card, bottom)
     'logout': { x: 400, y: 95 },               // Logout icon (top right)
     'balance': { x: 320, y: 95 },              // Balance display
     'balance_display': { x: 320, y: 95 },
@@ -1030,12 +1059,28 @@ function getFlutterElementPosition(targetName: string): { x: number; y: number }
     'back_to_lobby': { x: 40, y: 95 },
     
     // Game screen (blackjack)
-    'deal_button': { x: 215, y: 500 },
-    'deal': { x: 215, y: 500 },
     'hit_button': { x: 150, y: 500 },
     'hit': { x: 150, y: 500 },
     'stand_button': { x: 280, y: 500 },
     'stand': { x: 280, y: 500 },
+    
+    // Poker table screen - DEAL button in center of table
+    'deal_button': { x: 215, y: 575 },
+    'deal': { x: 215, y: 575 },
+    
+    // Poker table screen - action buttons at bottom row (iPhone 16 Pro Max: 430x932)
+    // 4 buttons evenly spaced: FOLD | CALL/CHECK | RAISE | ALL IN
+    'fold_button': { x: 55, y: 905 },
+    'fold': { x: 55, y: 905 },
+    'check_button': { x: 160, y: 905 },    // CHECK replaces CALL when no bet
+    'check': { x: 160, y: 905 },
+    'call_button': { x: 160, y: 905 },     // CALL is in same position as CHECK  
+    'call': { x: 160, y: 905 },
+    'raise_button': { x: 265, y: 905 },
+    'raise': { x: 265, y: 905 },
+    'all_in_button': { x: 370, y: 905 },
+    'all_in': { x: 370, y: 905 },
+    'allin': { x: 370, y: 905 },
   };
 
   for (const [key, pos] of Object.entries(positions)) {

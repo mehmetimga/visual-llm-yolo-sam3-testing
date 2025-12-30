@@ -1,0 +1,31 @@
+# Poker UI Detection Dataset
+# For training YOLO to detect poker game elements
+
+path: /Users/mehmetimga/ai-campions/visual-llm-yolo-sam3-testing/services/detector/training_data
+train: poker_images
+val: poker_images
+
+names:
+  0: button
+  1: card_face
+  2: card_back
+  3: chip_stack
+  4: pot_display
+  5: player_badge
+  6: slider
+  7: community_area
+  8: winner_banner
+  9: text_label
+
+# Class descriptions:
+# button: Action buttons (FOLD, CHECK, CALL, RAISE, ALL-IN, DEAL AGAIN)
+# card_face: Visible playing cards with value and suit showing
+# card_back: Face-down cards (back design visible)
+# chip_stack: Player chip displays and amounts
+# pot_display: Central pot amount display
+# player_badge: Player name and chip info badges
+# slider: Bet amount slider control
+# community_area: The 5-card community board area
+# winner_banner: Win announcement overlay
+# text_label: Game text and labels
+

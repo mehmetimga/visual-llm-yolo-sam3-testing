@@ -118,6 +118,30 @@
   "back_button": {
     "web": { "name": "back_button", "testId": "back-to-lobby", "role": "button", "text": "Back to Lobby" },
     "flutter": { "name": "back_button", "testId": "back_button", "text": "Back" }
+  },
+  "poker_play_button": {
+    "web": { "name": "poker_play_button", "testId": "poker-game", "role": "button", "text": "PLAY NOW" },
+    "flutter": { "name": "poker_play_button", "testId": "poker_play_button", "text": "PLAY NOW", "semanticsLabel": "Play Texas Hold'em" }
+  },
+  "poker_table_play_button": {
+    "web": { "name": "poker_table_play_button", "testId": "poker-table-game", "role": "button", "text": "PLAY POKER" },
+    "flutter": { "name": "poker_table_play_button", "testId": "poker_table_play_button", "text": "PLAY POKER", "semanticsLabel": "Play Poker Table" }
+  },
+  "fold_button": {
+    "web": { "name": "fold_button", "testId": "fold-btn", "role": "button", "text": "FOLD" },
+    "flutter": { "name": "fold_button", "testId": "fold_button", "text": "FOLD", "semanticsLabel": "Fold button" }
+  },
+  "check_button": {
+    "web": { "name": "check_button", "testId": "check-btn", "role": "button", "text": "CHECK" },
+    "flutter": { "name": "check_button", "testId": "check_button", "text": "CHECK", "semanticsLabel": "Check button" }
+  },
+  "call_button": {
+    "web": { "name": "call_button", "testId": "call-btn", "role": "button", "text": "CALL" },
+    "flutter": { "name": "call_button", "testId": "call_button", "text": "CALL", "semanticsLabel": "Call button" }
+  },
+  "raise_button": {
+    "web": { "name": "raise_button", "testId": "raise-btn", "role": "button", "text": "RAISE" },
+    "flutter": { "name": "raise_button", "testId": "raise_button", "text": "RAISE", "semanticsLabel": "Raise button" }
   }
 }
 

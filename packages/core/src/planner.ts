@@ -190,6 +190,13 @@ function createStepFromBddMatch(
         action: 'screenshot',
       } as Step;
 
+    case 'wait':
+      return {
+        ...baseStep,
+        action: 'wait',
+        meta: { ...baseStep.meta, seconds: parseInt(match.params.seconds, 10) },
+      } as Step;
+
     default:
       return null;
   }
