@@ -1,8 +1,57 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../models/poker_game_state.dart';
 import '../../services/poker_ai_service.dart';
 import '../../widgets/playing_card.dart';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STYLING TOKENS
+// ═══════════════════════════════════════════════════════════════════════════
+
+class PokerTheme {
+  // Colors
+  static const feltGreen = Color(0xFF1B5E20);
+  static const feltDark = Color(0xFF0D3B0F);
+  static const feltLight = Color(0xFF2E7D32);
+  static const railBrown = Color(0xFF5D4037);
+  static const gold = Color(0xFFFFD700);
+  static const goldDark = Color(0xFFFFA000);
+  
+  // Button colors
+  static const foldRed = Color(0xFFD32F2F);
+  static const checkBlue = Color(0xFF1976D2);
+  static const callGreen = Color(0xFF388E3C);
+  static const raiseOrange = Color(0xFFF57C00);
+  static const allInPurple = Color(0xFF7B1FA2);
+  
+  // Opacities
+  static const foldedOpacity = 0.5;
+  
+  // Shadows
+  static final cardShadow = BoxShadow(
+    color: Colors.black.withOpacity(0.4),
+    blurRadius: 4,
+    offset: const Offset(1, 2),
+  );
+  
+  // Animation durations
+  static const pulseMs = 1500;
+  static const fadeMs = 300;
+  
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LAYOUT CONSTANTS (Y anchors as fractions of table height)
+  // ═══════════════════════════════════════════════════════════════════════════
+  static const double topOpponentY = 0.02;      // Top player position
+  static const double sideOpponentY = 0.22;     // Left/Right player position
+  static const double boardAnchorY = 0.48;      // Community cards Y (moved down)
+  static const double potAnchorY = 0.66;        // Pot + chips below board (moved down)
+  static const double heroCardsAnchorY = 0.80;  // Hero cards
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN SCREEN
+// ═══════════════════════════════════════════════════════════════════════════
 
 class PokerTableScreen extends StatefulWidget {
   const PokerTableScreen({super.key});
@@ -11,18 +60,42 @@ class PokerTableScreen extends StatefulWidget {
   State<PokerTableScreen> createState() => _PokerTableScreenState();
 }
 
-class _PokerTableScreenState extends State<PokerTableScreen> {
+class _PokerTableScreenState extends State<PokerTableScreen> 
+    with TickerProviderStateMixin {
   late PokerTableState gameState;
   late PokerAIService aiService;
   bool isProcessingAI = false;
   int raiseAmount = 20;
+  
+  // Animations
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
 
   @override
   void initState() {
     super.initState();
     gameState = PokerTableState.newGame();
     aiService = PokerAIService();
+    
+    _pulseController = AnimationController(
+      duration: const Duration(milliseconds: PokerTheme.pulseMs),
+      vsync: this,
+    )..repeat(reverse: true);
+    
+    _pulseAnimation = Tween<double>(begin: 0.6, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
   }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GAME LOGIC
+  // ═══════════════════════════════════════════════════════════════════════════
 
   void _startNewHand() {
     print('');
@@ -103,61 +176,56 @@ class _PokerTableScreenState extends State<PokerTableScreen> {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // UI STATE HELPERS
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  bool get _isHandComplete => gameState.phase == TablePhase.finished;
+  bool get _isWaitingToStart => gameState.phase == TablePhase.waiting;
+  bool get _isShowdown => gameState.phase == TablePhase.showdown || _isHandComplete;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BUILD
+  // ═══════════════════════════════════════════════════════════════════════════
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0D3B0F),
+      backgroundColor: PokerTheme.feltDark,
       body: SafeArea(
         child: Column(
           children: [
-            _buildHeader(),
+            _buildMinimalHeader(),
             Expanded(child: _buildPokerTable()),
-            _buildActionButtons(), // Always show - prevents redraw jumping
+            _buildBottomPanel(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildHeader() {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MINIMAL HEADER (no pot - pot moved to table center)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildMinimalHeader() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white70, size: 22),
+            icon: const Icon(Icons.arrow_back_ios, color: Colors.white54, size: 20),
             onPressed: () => Navigator.pop(context),
           ),
           const Spacer(),
-          // Pot display
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFFFFD700), Color(0xFFFFA000)],
-              ),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFFFFD700).withOpacity(0.4),
-                  blurRadius: 8,
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('🏆', style: TextStyle(fontSize: 16)),
-                const SizedBox(width: 6),
-                Text(
-                  '\$${gameState.pot}',
-                  style: const TextStyle(
-                    color: Colors.black,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
+          // Table name/level indicator only
+          Text(
+            'TEXAS HOLD\'EM',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.6),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.5,
             ),
           ),
           const Spacer(),
@@ -167,458 +235,767 @@ class _PokerTableScreenState extends State<PokerTableScreen> {
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // POKER TABLE
+  // ═══════════════════════════════════════════════════════════════════════════
+
   Widget _buildPokerTable() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final tableWidth = constraints.maxWidth * 0.92;
-        final tableHeight = constraints.maxHeight * 0.75;
+        final tableWidth = constraints.maxWidth * 0.96;
+        final tableHeight = constraints.maxHeight * 0.95;
         
         return Stack(
           alignment: Alignment.center,
           children: [
-            // Poker table
-            Container(
-              width: tableWidth,
-              height: tableHeight,
-              decoration: BoxDecoration(
-                gradient: const RadialGradient(
-                  colors: [Color(0xFF2E7D32), Color(0xFF1B5E20), Color(0xFF0D3B0F)],
-                  stops: [0.0, 0.7, 1.0],
-                ),
-                borderRadius: BorderRadius.circular(tableHeight / 2),
-                border: Border.all(color: const Color(0xFF5D4037), width: 8),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.5),
-                    blurRadius: 30,
-                    spreadRadius: 5,
-                  ),
-                ],
-              ),
-            ),
+            // Table felt
+            _buildTableFelt(tableWidth, tableHeight),
             
-            // Inner table edge
-            Container(
-              width: tableWidth - 24,
-              height: tableHeight - 24,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular((tableHeight - 24) / 2),
-                border: Border.all(
-                  color: const Color(0xFF8D6E63).withOpacity(0.5),
-                  width: 2,
-                ),
-              ),
-            ),
-
-            // Community cards - center (moved down)
-            Positioned(
-              top: tableHeight * 0.45,
-              child: _buildCommunityCards(),
-            ),
-
+            // === PLAYERS (always full opacity - no blur/dim during reveal) ===
+            
             // Top player (Alex)
             Positioned(
-              top: 8,
-              child: _buildCompactPlayer(gameState.players[1]),
+              top: tableHeight * PokerTheme.topOpponentY,
+              child: _buildOpponentSeat(gameState.players[1]),
             ),
-
             // Left player (Beth)
             Positioned(
               left: 8,
-              top: tableHeight * 0.35,
-              child: _buildCompactPlayer(gameState.players[2]),
+              top: tableHeight * PokerTheme.sideOpponentY,
+              child: _buildOpponentSeat(gameState.players[2]),
             ),
-
             // Right player (Carl)
             Positioned(
               right: 8,
-              top: tableHeight * 0.35,
-              child: _buildCompactPlayer(gameState.players[3]),
+              top: tableHeight * PokerTheme.sideOpponentY,
+              child: _buildOpponentSeat(gameState.players[3]),
             ),
-
-            // Bottom player (You)
+            
+            // === COMMUNITY CARDS ===
             Positioned(
-              bottom: 8,
-              child: _buildHumanPlayer(),
+              top: tableHeight * PokerTheme.boardAnchorY,
+              child: _buildCommunityCards(),
+            ),
+            
+            // === POT (centered below community cards) ===
+            Positioned(
+              top: tableHeight * PokerTheme.potAnchorY,
+              child: _buildCenteredPot(),
             ),
 
-            // Start/New Hand button
-            if (gameState.phase == TablePhase.waiting || gameState.phase == TablePhase.finished)
-              _buildStartButton(),
+            // === HERO SEAT ===
+            Positioned(
+              top: tableHeight * PokerTheme.heroCardsAnchorY,
+              child: _buildHeroSeat(),
+            ),
 
-            // Winner overlay
-            if (gameState.winnerMessage != null && gameState.phase == TablePhase.finished)
-              _buildWinnerOverlay(),
+            // === DEAL BUTTON (only when waiting) ===
+            if (_isWaitingToStart)
+              Positioned(
+                top: tableHeight * 0.50,
+                child: _buildDealButton(),
+              ),
+
+            // === WINNER BANNER (between player cards and table cards) ===
+            if (gameState.winnerMessage != null && _isHandComplete)
+              Positioned(
+                top: tableHeight * 0.41,  // Just above community cards
+                left: 20,
+                right: 20,
+                child: _buildWinnerBanner(),
+              ),
           ],
         );
       },
     );
   }
 
+  Widget _buildTableFelt(double width, double height) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(height / 2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.6),
+            blurRadius: 30,
+            spreadRadius: 5,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(height / 2),
+        child: CustomPaint(
+          painter: _FeltPainter(),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(height / 2),
+              border: Border.all(color: PokerTheme.railBrown, width: 8),
+            ),
+            child: Container(
+              margin: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular((height / 2) - 8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.25),
+                    blurRadius: 12,
+                    spreadRadius: -4,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // COMMUNITY CARDS (5 fixed slots)
+  // ═══════════════════════════════════════════════════════════════════════════
+
   Widget _buildCommunityCards() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(5, (index) {
-        if (index < gameState.communityCards.length) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(5, (index) {
+          final hasCard = index < gameState.communityCards.length;
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 3),
-            child: PlayingCardWidget(
-              card: gameState.communityCards[index],
-              width: 48,
-              height: 70,
-            ),
+            child: hasCard
+                ? _buildRevealedCard(gameState.communityCards[index])
+                : _buildEmptySlot(),
           );
-        }
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 3),
-          child: Container(
-            width: 48,
-            height: 70,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.white.withOpacity(0.15)),
-            ),
-          ),
-        );
-      }),
+        }),
+      ),
     );
   }
 
-  Widget _buildCompactPlayer(PokerPlayer player) {
-    final isActive = player.isCurrentTurn;
-    final showCards = gameState.phase == TablePhase.showdown || 
-                      gameState.phase == TablePhase.finished;
+  /// Card with subtle glow highlight during reveal (no global blur)
+  Widget _buildRevealedCard(PlayingCard card) {
+    final isRevealing = _isShowdown;
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        boxShadow: [
+          PokerTheme.cardShadow,
+          if (isRevealing)
+            BoxShadow(
+              color: PokerTheme.gold.withOpacity(0.15),
+              blurRadius: 6,
+              spreadRadius: 1,
+            ),
+        ],
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: Colors.white.withOpacity(0.15),
+            width: 0.5,
+          ),
+        ),
+        child: PlayingCardWidget(card: card, width: 60, height: 87), // Same as hero
+      ),
+    );
+  }
 
+  Widget _buildEmptySlot() {
+    return Container(
+      width: 60,
+      height: 87,
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.06),
+          width: 1,
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CENTERED POT (below community cards)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildCenteredPot() {
+    if (gameState.pot == 0) return const SizedBox.shrink();
+    
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Name & chips
+        // Chip stack visual
+        _buildChipStack(),
+        const SizedBox(height: 4),
+        // Pot amount with glow
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           decoration: BoxDecoration(
-            color: isActive ? const Color(0xFFFFD700) : Colors.black54,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(player.avatar, style: const TextStyle(fontSize: 14)),
-              const SizedBox(width: 4),
-              Text(
-                player.name,
-                style: TextStyle(
-                  color: isActive ? Colors.black : Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-              if (player.isDealer) ...[
-                const SizedBox(width: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: isActive ? Colors.black : const Color(0xFFFFD700),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    'D',
-                    style: TextStyle(
-                      color: isActive ? const Color(0xFFFFD700) : Colors.black,
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(width: 6),
-              Text(
-                '\$${player.chips}',
-                style: TextStyle(
-                  color: isActive ? Colors.green.shade800 : const Color(0xFF4CAF50),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11,
-                ),
+            gradient: const LinearGradient(
+              colors: [PokerTheme.gold, PokerTheme.goldDark],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: PokerTheme.gold.withOpacity(0.35),
+                blurRadius: 10,
+                spreadRadius: 1,
               ),
             ],
           ),
-        ),
-        
-        const SizedBox(height: 6),
-        
-        // Cards
-        if (player.hand.isNotEmpty)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: player.hand.map((card) => Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 1),
-              child: PlayingCardWidget(
-                card: card,
-                faceDown: !showCards && !player.hasFolded,
-                width: 36,
-                height: 52,
-              ),
-            )).toList(),
-          ),
-
-        // Status
-        if (player.hasFolded)
-          const Padding(
-            padding: EdgeInsets.only(top: 4),
-            child: Text('FOLD', style: TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold)),
-          )
-        else if (player.currentBet > 0)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.amber.shade700,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                '\$${player.currentBet}',
-                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-              ),
+          child: Text(
+            '\$${gameState.pot}',
+            style: const TextStyle(
+              color: Colors.black,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
             ),
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildChipStack() {
+    return SizedBox(
+      width: 40,
+      height: 24,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned(
+            bottom: 0,
+            child: _buildChip(Colors.red.shade700),
+          ),
+          Positioned(
+            bottom: 4,
+            left: 6,
+            child: _buildChip(Colors.blue.shade700),
+          ),
+          Positioned(
+            bottom: 8,
+            right: 6,
+            child: _buildChip(Colors.green.shade700),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChip(Color color) {
+    return Container(
+      width: 16,
+      height: 16,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 2,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // OPPONENT SEATS (no opacity change during reveal - always readable)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildOpponentSeat(PokerPlayer player) {
+    final isActive = player.isCurrentTurn;
+    final isFolded = player.hasFolded;
+    final showCards = _isShowdown;
+
+    // NO global opacity - keep player info always readable
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Name badge - ALWAYS fully visible and readable
+        _buildPlayerBadge(player, isActive, isFolded),
+        
+        const SizedBox(height: 5),
+        
+        // Cards (bigger size, only cards get dimmed if folded)
+        if (player.hand.isNotEmpty)
+          _buildOpponentCards(player, showCards, isFolded),
+
+        // Status indicators
+        if (isFolded)
+          _buildFoldLabel()
+        else if (player.currentBet > 0)
+          _buildBetChip(player.currentBet),
 
         // Thinking bubble
-        if (player.thinkingMessage != null)
-          Container(
-            margin: const EdgeInsets.only(top: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            constraints: const BoxConstraints(maxWidth: 120),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
-            ),
-            child: Text(
-              player.thinkingMessage!,
-              style: const TextStyle(color: Colors.black87, fontSize: 10),
-              textAlign: TextAlign.center,
-            ),
-          ),
+        if (player.thinkingMessage != null && !isFolded)
+          _buildThinkingBubble(player.thinkingMessage!),
       ],
     );
   }
 
-  Widget _buildHumanPlayer() {
-    final player = gameState.players[0];
-    final isActive = player.isCurrentTurn;
+  Widget _buildPlayerBadge(PokerPlayer player, bool isActive, [bool isFolded = false]) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: isActive 
+            ? PokerTheme.gold 
+            : Colors.black.withOpacity(isFolded ? 0.6 : 0.8),
+        borderRadius: BorderRadius.circular(14),
+        border: isActive 
+            ? Border.all(color: Colors.white.withOpacity(0.4), width: 1)
+            : null,
+        boxShadow: isActive ? [
+          BoxShadow(color: PokerTheme.gold.withOpacity(0.4), blurRadius: 8),
+        ] : null,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(player.avatar, style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 5),
+          Text(
+            player.name,
+            style: TextStyle(
+              color: isActive ? Colors.black : (isFolded ? Colors.white60 : Colors.white),
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+          ),
+          if (player.isDealer) ...[
+            const SizedBox(width: 5),
+            _buildDealerChip(isActive),
+          ],
+          const SizedBox(width: 8),
+          Text(
+            '\$${player.chips}',
+            style: TextStyle(
+              color: isActive ? Colors.green.shade800 : (isFolded ? const Color(0xFF66BB6A) : const Color(0xFF81C784)),
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Cards
-        if (player.hand.isNotEmpty)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: player.hand.map((card) => Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
+  Widget _buildOpponentCards(PokerPlayer player, bool showCards, bool isFolded) {
+    final isRevealed = showCards || isFolded;
+    
+    return Opacity(
+      opacity: isFolded ? 0.6 : 1.0,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: player.hand.map((card) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: [
+                  PokerTheme.cardShadow,
+                  if (isRevealed && !isFolded)
+                    BoxShadow(
+                      color: PokerTheme.gold.withOpacity(0.15),
+                      blurRadius: 4,
+                    ),
+                ],
+              ),
               child: PlayingCardWidget(
                 card: card,
-                width: 56,
-                height: 82,
+                faceDown: !showCards && !isFolded,
+                width: 60,  // Same as hero
+                height: 87, // Same as hero
               ),
-            )).toList(),
-          ),
-        
-        const SizedBox(height: 6),
-
-        // Name bar with chips
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          decoration: BoxDecoration(
-            gradient: isActive 
-                ? const LinearGradient(colors: [Color(0xFFFFD700), Color(0xFFFFA000)])
-                : null,
-            color: isActive ? null : Colors.black54,
-            borderRadius: BorderRadius.circular(16),
-            border: isActive ? null : Border.all(color: const Color(0xFFFFD700).withOpacity(0.5)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '👤 YOU',
-                style: TextStyle(
-                  color: isActive ? Colors.black : const Color(0xFFFFD700),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                '\$${player.chips}',
-                style: TextStyle(
-                  color: isActive ? Colors.green.shade800 : const Color(0xFF4CAF50),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
-              if (player.currentBet > 0) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.shade700,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    'Bet: \$${player.currentBet}',
-                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-              if (player.isDealer) ...[
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: isActive ? Colors.black : const Color(0xFFFFD700),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    'D',
-                    style: TextStyle(
-                      color: isActive ? const Color(0xFFFFD700) : Colors.black,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildStartButton() {
-    return ElevatedButton(
-      onPressed: _startNewHand,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFFFFD700),
-        foregroundColor: Colors.black,
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-        elevation: 8,
-        shadowColor: const Color(0xFFFFD700).withOpacity(0.5),
-      ),
-      child: Text(
-        gameState.phase == TablePhase.waiting ? 'DEAL' : 'NEW HAND',
-        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
 
-  Widget _buildWinnerOverlay() {
+  Widget _buildDealerChip(bool isActive) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.85),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFFFD700), width: 2),
+        color: isActive ? Colors.black : PokerTheme.gold,
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        gameState.winnerMessage!,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: Color(0xFFFFD700),
-          fontSize: 15,
+        'D',
+        style: TextStyle(
+          color: isActive ? PokerTheme.gold : Colors.black,
+          fontSize: 8,
           fontWeight: FontWeight.bold,
         ),
       ),
     );
   }
 
-  Widget _buildActionButtons() {
-    final canCheck = gameState.canCheck;
-    final toCall = gameState.amountToCall;
-    final playerChips = gameState.currentPlayer.chips;
-    final isMyTurn = gameState.isHumanTurn;
+  Widget _buildFoldLabel() {
+    return const Padding(
+      padding: EdgeInsets.only(top: 3),
+      child: Text(
+        'FOLD',
+        style: TextStyle(
+          color: Colors.red,
+          fontSize: 8,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
 
+  Widget _buildBetChip(int amount) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.amber.shade600, Colors.amber.shade800],
+          ),
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.3),
+              blurRadius: 2,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        child: Text(
+          '\$$amount',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 9,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildThinkingBubble(String message) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      constraints: const BoxConstraints(maxWidth: 100),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4),
+        ],
+      ),
+      child: Text(
+        message,
+        style: const TextStyle(color: Colors.black87, fontSize: 9),
+        textAlign: TextAlign.center,
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HERO SEAT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildHeroSeat() {
+    final player = gameState.players[0];
+    final isActive = player.isCurrentTurn;
+
+    return AnimatedBuilder(
+      animation: _pulseAnimation,
+      builder: (context, child) {
+        return Container(
+          padding: const EdgeInsets.all(6),
+          decoration: isActive ? BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: PokerTheme.gold.withOpacity(0.25 * _pulseAnimation.value),
+                blurRadius: 20,
+                spreadRadius: 3,
+              ),
+            ],
+          ) : null,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Hero cards (bigger)
+              if (player.hand.isNotEmpty)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: player.hand.map((card) => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.2),
+                          width: 1,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.5),
+                            blurRadius: 8,
+                            offset: const Offset(2, 4),
+                          ),
+                        ],
+                      ),
+                      child: PlayingCardWidget(card: card, width: 60, height: 87), // Bigger
+                    ),
+                  )).toList(),
+                ),
+              
+              const SizedBox(height: 6),
+
+              // Hero info bar
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  gradient: isActive 
+                      ? const LinearGradient(colors: [PokerTheme.gold, PokerTheme.goldDark])
+                      : null,
+                  color: isActive ? null : Colors.black.withOpacity(0.75),
+                  borderRadius: BorderRadius.circular(18),
+                  border: isActive ? null : Border.all(
+                    color: PokerTheme.gold.withOpacity(0.4),
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '👤 YOU',
+                      style: TextStyle(
+                        color: isActive ? Colors.black : PokerTheme.gold,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                    if (player.isDealer) ...[
+                      const SizedBox(width: 5),
+                      _buildDealerChip(isActive),
+                    ],
+                    const SizedBox(width: 8),
+                    Text(
+                      '\$${player.chips}',
+                      style: TextStyle(
+                        color: isActive ? Colors.green.shade800 : const Color(0xFF81C784),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                    if (player.currentBet > 0) ...[
+                      const SizedBox(width: 6),
+                      _buildBetChip(player.currentBet),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DEAL BUTTON & WINNER BANNER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildDealButton() {
+    return ElevatedButton(
+      onPressed: _startNewHand,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: PokerTheme.gold,
+        foregroundColor: Colors.black,
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+        elevation: 8,
+        shadowColor: PokerTheme.gold.withOpacity(0.5),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ),
+      child: const Text(
+        'DEAL',
+        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+      ),
+    );
+  }
+
+  Widget _buildWinnerBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: PokerTheme.gold, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: PokerTheme.gold.withOpacity(0.25),
+            blurRadius: 12,
+          ),
+        ],
+      ),
+      child: Text(
+        gameState.winnerMessage!,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: PokerTheme.gold,
+          fontSize: 13,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BOTTOM PANEL (Action buttons OR "Deal Again" CTA)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildBottomPanel() {
+    // ISSUE 3: Show "Deal Again" when hand is complete
+    if (_isHandComplete) {
+      return _buildDealAgainPanel();
+    }
+    
+    // Normal action panel during play
+    return _buildActionPanel();
+  }
+
+  /// Issue 3: "DEAL AGAIN" CTA replaces action buttons after hand ends
+  Widget _buildDealAgainPanel() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A1A1A), Color(0xFF0A0A0A)],
+          colors: [Color(0xFF1C1C1C), Color(0xFF0F0F0F)],
         ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.5),
             blurRadius: 10,
-            offset: const Offset(0, -2),
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          onPressed: _startNewHand,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: PokerTheme.gold,
+            foregroundColor: Colors.black,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            elevation: 8,
+            shadowColor: PokerTheme.gold.withOpacity(0.4),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+          child: const Text(
+            'DEAL AGAIN',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionPanel() {
+    final canCheck = gameState.canCheck;
+    final toCall = gameState.amountToCall;
+    final playerChips = gameState.currentPlayer.chips;
+    final isMyTurn = gameState.isHumanTurn;
+    
+    final pot = gameState.pot;
+    final halfPot = (pot / 2).round();
+    final maxRaise = (playerChips - toCall).clamp(20, 500);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 18),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF1C1C1C), Color(0xFF0F0F0F)],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.5),
+            blurRadius: 10,
+            offset: const Offset(0, -4),
           ),
         ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Raise slider with gradient track
-          Row(
-            children: [
-              const Text('Raise', style: TextStyle(color: Colors.white38, fontSize: 11)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 6,
-                    activeTrackColor: const Color(0xFF4CAF50),
-                    inactiveTrackColor: const Color(0xFF2E2E2E),
-                    thumbColor: const Color(0xFF66BB6A),
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 10),
-                    overlayColor: const Color(0xFF4CAF50).withOpacity(0.2),
-                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
-                  ),
-                  child: Slider(
-                    value: raiseAmount.toDouble(),
-                    min: 20,
-                    max: (playerChips - toCall).clamp(20, 500).toDouble(),
-                    divisions: 24,
-                    onChanged: isMyTurn ? (value) => setState(() => raiseAmount = value.toInt()) : null,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                width: 60,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF4CAF50), Color(0xFF388E3C)],
-                  ),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '\$$raiseAmount',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                ),
-              ),
-            ],
-          ),
-          
+          _buildBetSlider(isMyTurn, toCall, playerChips, halfPot, pot, maxRaise),
           const SizedBox(height: 12),
-          
-          // Action buttons - always visible, disabled when not your turn
           Row(
             children: [
-              Expanded(child: _actionBtn('FOLD', const Color(0xFFE53935), isMyTurn ? () => _executeHumanAction(PlayerAction.fold) : null)),
-              const SizedBox(width: 8),
+              Expanded(
+                child: _actionBtn(
+                  'FOLD',
+                  PokerTheme.foldRed,
+                  isMyTurn ? () => _executeHumanAction(PlayerAction.fold) : null,
+                ),
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: canCheck
-                    ? _actionBtn('CHECK', const Color(0xFF1E88E5), isMyTurn ? () => _executeHumanAction(PlayerAction.check) : null)
-                    : _actionBtn('CALL \$$toCall', const Color(0xFF43A047), isMyTurn ? () => _executeHumanAction(PlayerAction.call) : null),
+                    ? _actionBtn(
+                        'CHECK',
+                        PokerTheme.checkBlue,
+                        isMyTurn ? () => _executeHumanAction(PlayerAction.check) : null,
+                      )
+                    : _actionBtn(
+                        'CALL \$$toCall',
+                        PokerTheme.callGreen,
+                        isMyTurn ? () => _executeHumanAction(PlayerAction.call) : null,
+                      ),
               ),
-              const SizedBox(width: 8),
-              Expanded(child: _actionBtn('RAISE', const Color(0xFFFF9800), isMyTurn ? () => _executeHumanAction(PlayerAction.raise, raise: raiseAmount) : null)),
-              const SizedBox(width: 8),
-              Expanded(child: _actionBtn('ALL IN', const Color(0xFF8E24AA), isMyTurn ? () => _executeHumanAction(PlayerAction.allIn) : null)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: AnimatedBuilder(
+                  animation: _pulseAnimation,
+                  builder: (context, child) {
+                    return _actionBtn(
+                      'RAISE',
+                      PokerTheme.raiseOrange,
+                      isMyTurn ? () => _executeHumanAction(PlayerAction.raise, raise: raiseAmount) : null,
+                      isPulsing: isMyTurn,
+                      pulseValue: _pulseAnimation.value,
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _actionBtn(
+                  'ALL IN',
+                  PokerTheme.allInPurple,
+                  isMyTurn ? () => _executeHumanAction(PlayerAction.allIn) : null,
+                ),
+              ),
             ],
           ),
         ],
@@ -626,20 +1003,166 @@ class _PokerTableScreenState extends State<PokerTableScreen> {
     );
   }
 
-  Widget _actionBtn(String label, Color color, VoidCallback? onPressed) {
-    final isEnabled = onPressed != null;
-    return ElevatedButton(
-      onPressed: onPressed,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isEnabled ? color : color.withOpacity(0.3),
-        foregroundColor: isEnabled ? Colors.white : Colors.white38,
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        elevation: isEnabled ? 4 : 0,
+  Widget _buildBetSlider(bool isMyTurn, int toCall, int chips, int halfPot, int pot, int maxRaise) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _sliderLabel('Min', 20, maxRaise),
+              _sliderLabel('½ Pot', halfPot, maxRaise),
+              _sliderLabel('Pot', pot, maxRaise),
+              _sliderLabel('Max', maxRaise, maxRaise),
+            ],
+          ),
+        ),
+        const SizedBox(height: 2),
+        Row(
+          children: [
+            Expanded(
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 6,
+                  activeTrackColor: const Color(0xFF66BB6A),
+                  inactiveTrackColor: const Color(0xFF2A2A2A),
+                  thumbColor: const Color(0xFF4CAF50),
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 10,
+                    elevation: 3,
+                  ),
+                  overlayColor: const Color(0xFF4CAF50).withOpacity(0.2),
+                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
+                ),
+                child: Slider(
+                  value: raiseAmount.toDouble().clamp(20, maxRaise.toDouble()),
+                  min: 20,
+                  max: maxRaise.toDouble(),
+                  divisions: 24,
+                  onChanged: isMyTurn 
+                      ? (value) => setState(() => raiseAmount = value.toInt())
+                      : null,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              width: 64,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF4CAF50), Color(0xFF388E3C)],
+                ),
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF4CAF50).withOpacity(0.3),
+                    blurRadius: 4,
+                  ),
+                ],
+              ),
+              child: Text(
+                '\$$raiseAmount',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _sliderLabel(String label, int value, int max) {
+    final isActive = (raiseAmount - value).abs() < 15;
+    return GestureDetector(
+      onTap: () => setState(() => raiseAmount = value.clamp(20, max)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isActive ? const Color(0xFF81C784) : Colors.white38,
+            fontSize: 9,
+            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
       ),
-      child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+    );
+  }
+
+  Widget _actionBtn(String label, Color color, VoidCallback? onPressed, {
+    bool isPulsing = false,
+    double pulseValue = 1.0,
+  }) {
+    final isEnabled = onPressed != null;
+    
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: isEnabled ? [
+          BoxShadow(
+            color: color.withOpacity(isPulsing ? 0.35 * pulseValue : 0.25),
+            blurRadius: isPulsing ? 8 * pulseValue : 4,
+            offset: const Offset(0, 2),
+          ),
+        ] : null,
+      ),
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isEnabled ? color : color.withOpacity(0.2),
+          foregroundColor: isEnabled ? Colors.white : Colors.white24,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          elevation: isEnabled ? 3 : 0,
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10),
+        ),
+      ),
     );
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// FELT PAINTER
+// ═══════════════════════════════════════════════════════════════════════════
 
+class _FeltPainter extends CustomPainter {
+  final math.Random _random = math.Random(42);
+  
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
+    
+    final gradient = RadialGradient(
+      center: Alignment.center,
+      radius: 0.8,
+      colors: [
+        PokerTheme.feltLight,
+        PokerTheme.feltGreen,
+        PokerTheme.feltDark,
+      ],
+      stops: const [0.0, 0.5, 1.0],
+    );
+    canvas.drawRect(rect, Paint()..shader = gradient.createShader(rect));
+    
+    final noisePaint = Paint()..color = Colors.black.withOpacity(0.03);
+    for (int i = 0; i < 600; i++) {
+      final x = _random.nextDouble() * size.width;
+      final y = _random.nextDouble() * size.height;
+      final r = _random.nextDouble() * 1.2;
+      canvas.drawCircle(Offset(x, y), r, noisePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
