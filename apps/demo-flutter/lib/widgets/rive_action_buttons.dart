@@ -68,6 +68,9 @@ class _RiveActionButtonsState extends State<RiveActionButtons> {
   // Slider
   ViewModelInstanceNumber? _sliderValue;
   ViewModelInstanceBoolean? _sliderVisible;
+  
+  // Bet size input (the "$value" display)
+  ViewModelInstanceString? _betSizeInputValue;
 
   // State machine inputs
   TriggerInput? _enterTrigger;
@@ -123,8 +126,14 @@ class _RiveActionButtonsState extends State<RiveActionButtons> {
       _setupStateMachine();
 
       // Fire enter animation
-      _enterTrigger?.fire();
-      debugPrint('RiveActionButtons: Enter trigger fired');
+      // Try Enter State first (immediate, no animation), fall back to Enter
+      if (_enterStateTrigger != null) {
+        _enterStateTrigger!.fire();
+        debugPrint('RiveActionButtons: Enter State trigger fired (immediate)');
+      } else {
+        _enterTrigger?.fire();
+        debugPrint('RiveActionButtons: Enter trigger fired (animated)');
+      }
 
       // Set initial state
       _updateButtonStates();
@@ -190,31 +199,46 @@ class _RiveActionButtonsState extends State<RiveActionButtons> {
 
     // Slider value
     _sliderValue = _vmi!.number('Slider Value');
+    
+    // Bet size input (the "$value" display in the middle)
+    try {
+      final betSizeInputVmi = _vmi!.viewModel('Bet Size Text Input');
+      _betSizeInputValue = betSizeInputVmi?.string('Value');
+      debugPrint('RiveActionButtons: Bound Bet Size Text Input');
+    } catch (e) {
+      debugPrint('RiveActionButtons: Could not bind Bet Size Text Input: $e');
+    }
 
     // Setup click listeners with debounce protection
     _foldButton?.clicked?.addListener((_) => _handleClick('FOLD', () => widget.onFold?.call()));
     _checkButton?.clicked?.addListener((_) => _handleClick('CHECK', () => widget.onCheck?.call()));
     _callButton?.clicked?.addListener((_) => _handleClick('CALL', () => widget.onCall?.call()));
-    _raiseButton?.clicked?.addListener((_) => _handleClick('RAISE', () => widget.onRaise?.call(widget.raiseAmount)));
+    // RAISE button handles both BET and RAISE in mobile
+    _raiseButton?.clicked?.addListener((_) => _handleClick(
+      widget.canCheck ? 'BET' : 'RAISE', 
+      () => widget.onRaise?.call(widget.raiseAmount)
+    ));
+    // BET button not used in mobile (hidden)
     _betButton?.clicked?.addListener((_) => _handleClick('BET', () => widget.onRaise?.call(widget.raiseAmount)));
+    // ALL-IN not used in mobile layout
     _allInButton?.clicked?.addListener((_) => _handleClick('ALL-IN', () => widget.onAllIn?.call()));
 
-    // Bet shortcuts click listeners
+    // Bet shortcuts click listeners (matches production order)
     _betSize1?.clicked?.addListener((_) {
-      debugPrint('Bet Size 1 clicked');
-      widget.onSliderChanged?.call(widget.minRaise);
+      debugPrint('All-in clicked');
+      widget.onSliderChanged?.call(widget.maxRaise);  // All-in = max
     });
     _betSize2?.clicked?.addListener((_) {
-      debugPrint('Bet Size 2 clicked');
-      widget.onSliderChanged?.call((widget.pot / 2).round().clamp(widget.minRaise, widget.maxRaise));
-    });
-    _betSize3?.clicked?.addListener((_) {
-      debugPrint('Bet Size 3 clicked');
+      debugPrint('Pot clicked');
       widget.onSliderChanged?.call(widget.pot.clamp(widget.minRaise, widget.maxRaise));
     });
+    _betSize3?.clicked?.addListener((_) {
+      debugPrint('3/4 Pot clicked');
+      widget.onSliderChanged?.call((widget.pot * 3 / 4).round().clamp(widget.minRaise, widget.maxRaise));
+    });
     _betSize4?.clicked?.addListener((_) {
-      debugPrint('Bet Size 4 clicked');
-      widget.onSliderChanged?.call(widget.maxRaise);
+      debugPrint('Min clicked');
+      widget.onSliderChanged?.call(widget.minRaise);
     });
 
     // Slider value listener - defer to avoid calling setState during build
@@ -274,6 +298,8 @@ class _RiveActionButtonsState extends State<RiveActionButtons> {
     return null;
   }
 
+  TriggerInput? _enterStateTrigger;
+  
   void _setupStateMachine() {
     final sm = _controller?.stateMachine;
     if (sm == null) return;
@@ -282,6 +308,9 @@ class _RiveActionButtonsState extends State<RiveActionButtons> {
       debugPrint('RiveActionButtons: SM Input: ${input.name} (${input.runtimeType})');
       if (input.name == 'Enter' && input is TriggerInput) {
         _enterTrigger = input;
+      }
+      if (input.name == 'Enter State' && input is TriggerInput) {
+        _enterStateTrigger = input;
       }
       if (input.name == 'Slider Visible' && input is BooleanInput) {
         _sliderVisibleInput = input;
@@ -299,67 +328,99 @@ class _RiveActionButtonsState extends State<RiveActionButtons> {
     final callAmount = widget.callAmount;
     final raiseAmount = widget.raiseAmount;
     final pot = widget.pot;
+    
+    // Debug: log button state
+    debugPrint('');
+    debugPrint('=== UPDATE BUTTON STATES ===');
+    debugPrint('canCheck=$canCheck, isEnabled=$isEnabled, callAmount=$callAmount, pot=$pot');
 
-    // FOLD - always visible
+    // FOLD - always visible (title case like production)
     _foldButton?.visible?.value = true;
     _foldButton?.enabled?.value = isEnabled;
-    _foldButton?.label?.value = 'FOLD';
+    _foldButton?.label?.value = 'Fold';
 
-    // CHECK - visible when canCheck
-    _checkButton?.visible?.value = canCheck;
-    _checkButton?.enabled?.value = isEnabled && canCheck;
-    _checkButton?.label?.value = 'CHECK';
+    // === MOBILE LAYOUT (matches production) ===
+    // In mobile: RAISE button is used for BOTH BET and RAISE
+    // CHECK and CALL are separate buttons
+    
+    // CHECK - visible when canCheck (no bet to call)
+    if (_checkButton == null) {
+      debugPrint('WARNING: CHECK button not bound!');
+    } else {
+      if (_checkButton!.visible == null) {
+        debugPrint('WARNING: CHECK visible property is NULL!');
+      } else {
+        _checkButton!.visible!.value = canCheck;
+      }
+      _checkButton!.enabled?.value = isEnabled && canCheck;
+      _checkButton!.label?.value = 'Check';
+      debugPrint('CHECK: setVisible=$canCheck, actualVisible=${_checkButton!.visible?.value}');
+    }
 
-    // CALL - visible when !canCheck
-    _callButton?.visible?.value = !canCheck;
-    _callButton?.enabled?.value = isEnabled && !canCheck;
-    _callButton?.label?.value = 'CALL';
-    _callButton?.value?.value = '\$$callAmount';
+    // CALL - visible when !canCheck (there's a bet to call)
+    if (_callButton == null) {
+      debugPrint('WARNING: CALL button not bound!');
+    } else {
+      if (_callButton!.visible == null) {
+        debugPrint('WARNING: CALL visible property is NULL!');
+      } else {
+        _callButton!.visible!.value = !canCheck;
+      }
+      _callButton!.enabled?.value = isEnabled && !canCheck;
+      _callButton!.label?.value = 'Call';
+      _callButton!.value?.value = '\$$callAmount';
+      debugPrint('CALL: setVisible=${!canCheck}, actualVisible=${_callButton!.visible?.value}, value=\$$callAmount');
+    }
 
-    // RAISE - visible when !canCheck
-    _raiseButton?.visible?.value = !canCheck;
-    _raiseButton?.enabled?.value = isEnabled && !canCheck;
-    _raiseButton?.label?.value = 'RAISE';
+    // RAISE - visible for BOTH BET and RAISE in mobile (always visible when enabled)
+    _raiseButton?.visible?.value = true;  // Always visible in mobile
+    _raiseButton?.enabled?.value = isEnabled;
+    // Label: "Bet" or "Raise to" (matches production style)
+    _raiseButton?.label?.value = canCheck ? 'Bet' : 'Raise to';
     _raiseButton?.value?.value = '\$$raiseAmount';
+    debugPrint('Raise button: ${canCheck ? "Bet" : "Raise to"} \$$raiseAmount');
 
-    // BET - visible when canCheck
-    _betButton?.visible?.value = canCheck;
-    _betButton?.enabled?.value = isEnabled && canCheck;
-    _betButton?.label?.value = 'BET';
-    _betButton?.value?.value = '\$$raiseAmount';
+    // BET - HIDDEN on mobile (RAISE button handles both)
+    _betButton?.visible?.value = false;
 
-    // ALL-IN - always visible
-    _allInButton?.visible?.value = true;
-    _allInButton?.enabled?.value = isEnabled;
-    _allInButton?.label?.value = 'ALL IN';
+    // ALL-IN - hidden (not used in production mobile layout)
+    _allInButton?.visible?.value = false;
 
-    // Bet shortcuts
+    // Bet shortcuts (matches production style - title case)
     final showBetControls = isEnabled;
     final halfPot = (pot / 2).round().clamp(widget.minRaise, widget.maxRaise);
+    final threeFourthPot = (pot * 3 / 4).round().clamp(widget.minRaise, widget.maxRaise);
 
+    // Slot 1: All-in (top right)
     _betSize1?.visible?.value = showBetControls;
     _betSize1?.enabled?.value = isEnabled;
-    _betSize1?.label?.value = 'MIN';
-    _betSize1?.value?.value = '\$${widget.minRaise}';
+    _betSize1?.label?.value = 'All-in';
+    _betSize1?.value?.value = '\$${widget.maxRaise}';
 
+    // Slot 2: Pot
     _betSize2?.visible?.value = showBetControls;
     _betSize2?.enabled?.value = isEnabled;
-    _betSize2?.label?.value = '½ POT';
-    _betSize2?.value?.value = '\$$halfPot';
+    _betSize2?.label?.value = 'Pot';
+    _betSize2?.value?.value = '\$$pot';
 
+    // Slot 3: 3/4 Pot
     _betSize3?.visible?.value = showBetControls;
     _betSize3?.enabled?.value = isEnabled;
-    _betSize3?.label?.value = 'POT';
-    _betSize3?.value?.value = '\$$pot';
+    _betSize3?.label?.value = '3/4';
+    _betSize3?.value?.value = '\$$threeFourthPot';
 
+    // Slot 4: Min (bottom right)
     _betSize4?.visible?.value = showBetControls;
     _betSize4?.enabled?.value = isEnabled;
-    _betSize4?.label?.value = 'MAX';
-    _betSize4?.value?.value = '\$${widget.maxRaise}';
+    _betSize4?.label?.value = 'Min';
+    _betSize4?.value?.value = '\$${widget.minRaise}';
 
     // Slider
     _sliderVisibleInput?.value = showBetControls;
     _updateSliderPosition();
+    
+    // Bet size input value (the "$value" text in the middle)
+    _betSizeInputValue?.value = '\$$raiseAmount';
 
     // Advance to apply changes
     _controller?.advance(0);
@@ -398,33 +459,142 @@ class _RiveActionButtonsState extends State<RiveActionButtons> {
       return _buildError();
     }
 
-    return Container(
-      height: 180,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A1A1A), Color(0xFF0D0D0D)],
-        ),
+    // Artboard is 375x250
+    final screenWidth = MediaQuery.of(context).size.width;
+    final artboardWidth = _controller!.artboard.width;  // 375
+    final artboardHeight = _controller!.artboard.height; // 250
+    
+    // Scale to fill width, calculate proportional height
+    final scale = screenWidth / artboardWidth;
+    final scaledHeight = artboardHeight * scale;
+    
+    // Transparent container - buttons float over the table
+    return SizedBox(
+      width: screenWidth,
+      height: scaledHeight,
+      child: Stack(
+        children: [
+          // Rive animation with transparent background
+          RiveWidget(
+            controller: _controller!,
+            fit: Fit.contain,
+            alignment: Alignment.center,
+            hitTestBehavior: RiveHitTestBehavior.translucent,
+          ),
+          
+          // Overlay controls for bet size (positioned based on artboard layout)
+          if (widget.isEnabled) ...[
+            // Up arrow tap area (increase bet)
+            Positioned(
+              left: screenWidth * 0.38,  // Approximate position
+              top: scaledHeight * 0.08,
+              width: screenWidth * 0.22,
+              height: scaledHeight * 0.25,
+              child: GestureDetector(
+                onTap: _incrementBet,
+                behavior: HitTestBehavior.translucent,
+                child: Container(color: Colors.transparent),
+              ),
+            ),
+            // Down arrow tap area (decrease bet)
+            Positioned(
+              left: screenWidth * 0.38,
+              top: scaledHeight * 0.45,
+              width: screenWidth * 0.22,
+              height: scaledHeight * 0.25,
+              child: GestureDetector(
+                onTap: _decrementBet,
+                behavior: HitTestBehavior.translucent,
+                child: Container(color: Colors.transparent),
+              ),
+            ),
+            // Numpad button tap area
+            Positioned(
+              left: screenWidth * 0.60,
+              top: scaledHeight * 0.15,
+              width: screenWidth * 0.12,
+              height: scaledHeight * 0.40,
+              child: GestureDetector(
+                onTap: _showNumpadDialog,
+                behavior: HitTestBehavior.translucent,
+                child: Container(color: Colors.transparent),
+              ),
+            ),
+          ],
+        ],
       ),
-      child: RiveWidget(
-        controller: _controller!,
-        fit: Fit.contain,
-        hitTestBehavior: RiveHitTestBehavior.translucent,
+    );
+  }
+  
+  void _incrementBet() {
+    final step = widget.pot > 100 ? 20 : 10; // Increment by BB or 10
+    final newAmount = (widget.raiseAmount + step).clamp(widget.minRaise, widget.maxRaise);
+    widget.onSliderChanged?.call(newAmount);
+    debugPrint('Bet increased to \$$newAmount');
+  }
+  
+  void _decrementBet() {
+    final step = widget.pot > 100 ? 20 : 10;
+    final newAmount = (widget.raiseAmount - step).clamp(widget.minRaise, widget.maxRaise);
+    widget.onSliderChanged?.call(newAmount);
+    debugPrint('Bet decreased to \$$newAmount');
+  }
+  
+  void _showNumpadDialog() {
+    final controller = TextEditingController(text: widget.raiseAmount.toString());
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text(
+          'Enter Bet Amount',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white, fontSize: 24),
+          decoration: InputDecoration(
+            prefixText: '\$ ',
+            prefixStyle: const TextStyle(color: Colors.amber, fontSize: 24),
+            hintText: '${widget.minRaise} - ${widget.maxRaise}',
+            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+            enabledBorder: const UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.amber),
+            ),
+            focusedBorder: const UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.amber, width: 2),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('CANCEL', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+            onPressed: () {
+              final value = int.tryParse(controller.text) ?? widget.raiseAmount;
+              final clampedValue = value.clamp(widget.minRaise, widget.maxRaise);
+              widget.onSliderChanged?.call(clampedValue);
+              Navigator.pop(context);
+              debugPrint('Bet set to \$$clampedValue');
+            },
+            child: const Text('OK', style: TextStyle(color: Colors.black)),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildLoading() {
-    return Container(
+    final screenWidth = MediaQuery.of(context).size.width;
+    return SizedBox(
+      width: screenWidth,
       height: 180,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A1A1A), Color(0xFF0D0D0D)],
-        ),
-      ),
       child: const Center(
         child: CircularProgressIndicator(color: Colors.amber),
       ),
@@ -432,33 +602,30 @@ class _RiveActionButtonsState extends State<RiveActionButtons> {
   }
 
   Widget _buildError() {
-    return Container(
+    final screenWidth = MediaQuery.of(context).size.width;
+    return SizedBox(
+      width: screenWidth,
       height: 180,
-      padding: const EdgeInsets.all(16),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A1A1A), Color(0xFF0D0D0D)],
-        ),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.error_outline, color: Colors.red, size: 32),
-          const SizedBox(height: 8),
-          Text(
-            'Rive load failed',
-            style: TextStyle(color: Colors.red.shade300, fontSize: 12),
-          ),
-          if (_errorMessage != null)
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.red, size: 32),
+            const SizedBox(height: 8),
             Text(
-              _errorMessage!,
-              style: const TextStyle(color: Colors.white54, fontSize: 10),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+              'Rive load failed',
+              style: TextStyle(color: Colors.red.shade300, fontSize: 12),
             ),
-        ],
+            if (_errorMessage != null)
+              Text(
+                _errorMessage!,
+                style: const TextStyle(color: Colors.white54, fontSize: 10),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+          ],
+        ),
       ),
     );
   }

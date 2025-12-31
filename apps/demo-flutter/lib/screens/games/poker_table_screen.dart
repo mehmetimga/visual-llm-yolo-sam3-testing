@@ -47,7 +47,7 @@ class PokerTheme {
   static const double sideOpponentY = 0.22;     // Left/Right player position
   static const double boardAnchorY = 0.48;      // Community cards Y (moved down)
   static const double potAnchorY = 0.66;        // Pot + chips below board (moved down)
-  static const double heroCardsAnchorY = 0.80;  // Hero cards
+  static const double heroCardsAnchorY = 0.85;  // Hero cards (moved down)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -113,9 +113,14 @@ class _PokerTableScreenState extends State<PokerTableScreen>
   }
 
   Future<void> _processAITurnsIfNeeded() async {
+    print('🔄 _processAITurnsIfNeeded called');
+    print('   phase=${gameState.phase.name}, currentPlayer=${gameState.currentPlayer.name}, isHuman=${gameState.currentPlayer.isHuman}');
+    
     while (gameState.phase != TablePhase.waiting &&
            gameState.phase != TablePhase.finished &&
            !gameState.currentPlayer.isHuman) {
+      
+      print('   → AI turn: ${gameState.currentPlayer.name}');
       
       if (isProcessingAI) return;
       isProcessingAI = true;
@@ -144,6 +149,15 @@ class _PokerTableScreenState extends State<PokerTableScreen>
       
       _logPhaseIfChanged();
       await Future.delayed(const Duration(milliseconds: 400));
+    }
+    
+    // After loop exits - either waiting for human or game ended
+    if (gameState.currentPlayer.isHuman && 
+        gameState.phase != TablePhase.waiting && 
+        gameState.phase != TablePhase.finished) {
+      print('');
+      print('⏸️  YOUR TURN - waiting for action...');
+      print('   canCheck=${gameState.canCheck}, amountToCall=${gameState.amountToCall}');
     }
   }
 
@@ -194,11 +208,22 @@ class _PokerTableScreenState extends State<PokerTableScreen>
     return Scaffold(
       backgroundColor: PokerTheme.feltDark,
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            _buildMinimalHeader(),
-            Expanded(child: _buildPokerTable()),
-            _buildBottomPanel(),
+            // Full-screen table with header
+            Column(
+              children: [
+                _buildMinimalHeader(),
+                Expanded(child: _buildPokerTable()),
+              ],
+            ),
+            // Action buttons overlay at bottom (pushed down 30px)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: -30,  // Push down to not cover pot
+              child: _buildBottomPanel(),
+            ),
           ],
         ),
       ),
