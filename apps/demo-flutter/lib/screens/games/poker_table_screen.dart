@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../models/poker_game_state.dart';
 import '../../services/poker_ai_service.dart';
 import '../../widgets/playing_card.dart';
+import '../../widgets/rive_action_buttons.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // STYLING TOKENS
@@ -908,6 +909,33 @@ class _PokerTableScreenState extends State<PokerTableScreen>
   }
 
   Widget _buildActionPanel() {
+    final canCheck = gameState.canCheck;
+    final toCall = gameState.amountToCall;
+    final playerChips = gameState.currentPlayer.chips;
+    final isMyTurn = gameState.isHumanTurn;
+    final pot = gameState.pot;
+    final maxRaise = (playerChips - toCall).clamp(20, 500);
+
+    // Use Rive animated buttons
+    return RiveActionButtons(
+      isEnabled: isMyTurn,
+      canCheck: canCheck,
+      callAmount: toCall,
+      raiseAmount: raiseAmount,
+      minRaise: 20,
+      maxRaise: maxRaise,
+      pot: pot,
+      onFold: () => _executeHumanAction(PlayerAction.fold),
+      onCheck: () => _executeHumanAction(PlayerAction.check),
+      onCall: () => _executeHumanAction(PlayerAction.call),
+      onRaise: (amount) => _executeHumanAction(PlayerAction.raise, raise: amount),
+      onAllIn: () => _executeHumanAction(PlayerAction.allIn),
+      onSliderChanged: (value) => setState(() => raiseAmount = value),
+    );
+  }
+
+  // Keep original Flutter buttons as backup (can be toggled for A/B testing)
+  Widget _buildActionPanelFlutter() {
     final canCheck = gameState.canCheck;
     final toCall = gameState.amountToCall;
     final playerChips = gameState.currentPlayer.chips;

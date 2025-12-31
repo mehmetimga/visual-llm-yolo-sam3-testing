@@ -128,6 +128,8 @@ class PokerTableState {
   int bigBlind;
   int dealerIndex;
   int currentPlayerIndex;
+  int lastRaiserIndex;  // Track who raised last to ensure everyone gets to respond
+  int actionsThisRound; // Count actions in current betting round
   
   TablePhase phase;
   List<String> actionLog;
@@ -143,6 +145,8 @@ class PokerTableState {
         currentBet = 0,
         dealerIndex = 0,
         currentPlayerIndex = 0,
+        lastRaiserIndex = -1,
+        actionsThisRound = 0,
         phase = TablePhase.waiting,
         actionLog = [],
         winnerMessage = null;
@@ -200,6 +204,8 @@ class PokerTableState {
     currentBet = bigBlind;
     winnerMessage = null;
     actionLog = [];
+    lastRaiserIndex = -1;
+    actionsThisRound = 0;
     
     // Move dealer button
     dealerIndex = (dealerIndex + 1) % players.length;
@@ -270,6 +276,7 @@ class PokerTableState {
   /// Execute a player action
   void executeAction(PlayerAction action, {int raiseAmount = 0}) {
     final player = currentPlayer;
+    actionsThisRound++;
     
     switch (action) {
       case PlayerAction.fold:
@@ -303,14 +310,21 @@ class PokerTableState {
         player.lastAction = 'Raise \$$raiseAmount';
         _addLog('${player.avatar} ${player.name} raises to \$${player.currentBet}');
         if (player.chips == 0) player.isAllIn = true;
+        // Reset action count when someone raises - everyone must respond
+        lastRaiserIndex = currentPlayerIndex;
+        actionsThisRound = 1;
         break;
         
       case PlayerAction.allIn:
         final allInAmount = player.chips;
         pot += allInAmount;
         player.currentBet += allInAmount;
-        if (player.currentBet > currentBet) {
+        final wasRaise = player.currentBet > currentBet;
+        if (wasRaise) {
           currentBet = player.currentBet;
+          // Reset action count when someone raises - everyone must respond
+          lastRaiserIndex = currentPlayerIndex;
+          actionsThisRound = 1;
         }
         player.chips = 0;
         player.isAllIn = true;
@@ -360,9 +374,12 @@ class PokerTableState {
       }
     }
     
-    // Everyone has acted at least once after the last raise
-    // For simplicity, check if we've gone around once
-    return true;
+    // Count how many players can still act (not folded, not all-in)
+    final playersWhoCanAct = activePlayers.where((p) => !p.isAllIn).length;
+    
+    // Everyone must have had a chance to respond to any raise
+    // The round is complete when all players who can act have acted
+    return actionsThisRound >= playersWhoCanAct;
   }
 
   void _advancePhase() {
@@ -371,6 +388,8 @@ class PokerTableState {
       player.currentBet = 0;
     }
     currentBet = 0;
+    lastRaiserIndex = -1;
+    actionsThisRound = 0;
     
     switch (phase) {
       case TablePhase.preFlop:

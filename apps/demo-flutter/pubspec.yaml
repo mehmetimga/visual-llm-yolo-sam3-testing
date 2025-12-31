@@ -14,6 +14,7 @@ dependencies:
   cupertino_icons: ^1.0.6
   provider: ^6.1.1
   http: ^1.1.0
+  rive: ^0.14.0
 
 dev_dependencies:
   flutter_test:
@@ -25,3 +26,38 @@ flutter:
   
   assets:
     - assets/cards/
+    - assets/rive/
+    - assets/fonts/
+  
+  fonts:
+    - family: DMSans
+      fonts:
+        - asset: assets/fonts/DM Sans-Regular.ttf
+        - asset: assets/fonts/DM Sans-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/DM Sans-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/DM Sans-Italic.ttf
+          style: italic
+        - asset: assets/fonts/DM Sans-MediumItalic.ttf
+          weight: 500
+          style: italic
+        - asset: assets/fonts/DM Sans-BoldItalic.ttf
+          weight: 700
+          style: italic
+    
+    - family: IBMPlexSansCondensed
+      fonts:
+        - asset: assets/fonts/IBM Plex Sans Condensed-Light.ttf
+          weight: 300
+        - asset: assets/fonts/IBM Plex Sans Condensed-Regular.ttf
+        - asset: assets/fonts/IBM Plex Sans Condensed-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/IBM Plex Sans Condensed-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/IBM Plex Sans Condensed-Bold.ttf
+          weight: 700
+    
+    - family: Aldrich
+      fonts:
+        - asset: assets/fonts/Aldrich-Regular.ttf

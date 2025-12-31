@@ -7,7 +7,7 @@ dist/
 build/
 .next/
 out/
-
+riv-assets/
 services/detector/training_data/
 services/detector/runs/
 

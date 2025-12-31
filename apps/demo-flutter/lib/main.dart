@@ -7,9 +7,39 @@ import 'screens/games/slots_screen.dart';
 import 'screens/games/blackjack_screen.dart';
 import 'screens/games/poker_screen.dart';
 import 'screens/games/poker_table_screen.dart';
+import 'rive/cached_fonts.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Preload fonts for Rive
+  await _preloadRiveFonts();
+  
   runApp(const DemoCasinoApp());
+}
+
+/// Preload fonts for Rive action buttons
+Future<void> _preloadRiveFonts() async {
+  debugPrint('Preloading Rive fonts...');
+  final fonts = [
+    'assets/fonts/DM Sans-Regular.ttf',
+    'assets/fonts/DM Sans-Medium.ttf',
+    'assets/fonts/DM Sans-Bold.ttf',
+    'assets/fonts/IBM Plex Sans Condensed-Regular.ttf',
+    'assets/fonts/IBM Plex Sans Condensed-Medium.ttf',
+    'assets/fonts/IBM Plex Sans Condensed-SemiBold.ttf',
+    'assets/fonts/IBM Plex Sans Condensed-Bold.ttf',
+    'assets/fonts/Aldrich-Regular.ttf',
+  ];
+  
+  for (final font in fonts) {
+    try {
+      await CachedFonts.instance.addFont(font);
+    } catch (e) {
+      debugPrint('Warning: Could not load font $font: $e');
+    }
+  }
+  debugPrint('Rive fonts preloaded: ${CachedFonts.instance.fontCount} fonts');
 }
 
 class DemoCasinoApp extends StatelessWidget {
