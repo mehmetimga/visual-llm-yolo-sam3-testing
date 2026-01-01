@@ -7,6 +7,7 @@ import 'screens/games/slots_screen.dart';
 import 'screens/games/blackjack_screen.dart';
 import 'screens/games/poker_screen.dart';
 import 'screens/games/poker_table_screen.dart';
+import 'screens/games/debug_poker_setup_screen.dart';
 import 'rive/cached_fonts.dart';
 
 void main() async {
@@ -105,6 +106,7 @@ class DemoCasinoApp extends StatelessWidget {
           '/games/blackjack': (context) => const BlackjackScreen(),
           '/games/poker': (context) => const PokerScreen(),
           '/games/poker-table': (context) => const PokerTableScreen(),
+          '/games/debug-poker-setup': (context) => const DebugPokerSetupScreen(),
         },
       ),
     );

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 
@@ -22,7 +23,7 @@ class GameInfo {
   });
 }
 
-const games = [
+const _baseGames = [
   GameInfo(
     id: 'slots',
     name: 'Mega Slots',
@@ -64,6 +65,25 @@ const games = [
     testKey: 'poker_table_play_button',
     buttonText: 'PLAY POKER',
   ),
+];
+
+// Debug/Training mode - only in debug builds
+const _debugGames = [
+  GameInfo(
+    id: 'debug-poker',
+    name: 'YOLO Training',
+    icon: '🎯',
+    description: 'Debug: Force game states for training',
+    route: '/games/debug-poker-setup',
+    testKey: 'debug_poker_button',
+    buttonText: 'DEBUG MODE',
+  ),
+];
+
+/// All games including debug games in debug mode
+List<GameInfo> get games => [
+  ..._baseGames,
+  if (kDebugMode) ..._debugGames,
 ];
 
 class LobbyScreen extends StatelessWidget {
@@ -172,7 +192,7 @@ class LobbyScreen extends StatelessWidget {
                   crossAxisCount: 2,
                   crossAxisSpacing: 16,
                   mainAxisSpacing: 16,
-                  childAspectRatio: 0.85,
+                  childAspectRatio: 0.75,
                 ),
                 itemCount: games.length,
                 itemBuilder: (context, index) => GameCard(game: games[index]),
@@ -287,51 +307,60 @@ class GameCard extends StatelessWidget {
           Expanded(
             flex: 4,
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
                     game.name,
                     style: const TextStyle(
-                      fontSize: 18,
+                      fontSize: 16,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
                     game.description,
                     style: const TextStyle(
                       color: Colors.grey,
-                      fontSize: 12,
+                      fontSize: 11,
                     ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   const Spacer(),
-                  ElevatedButton(
-                    key: Key(game.testKey),
-                    onPressed: () {
-                      if (game.route.contains('slots') ||
-                          game.route.contains('blackjack') ||
-                          game.route.contains('poker') ||
-                          game.route.contains('poker-table')) {
-                        Navigator.pushNamed(context, game.route);
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('${game.name} coming soon!'),
-                          ),
-                        );
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00FF88),
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    child: Text(
-                      game.buttonText,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+                  Semantics(
+                    identifier: game.testKey,
+                    label: game.testKey,
+                    button: true,
+                    child: ElevatedButton(
+                      key: Key(game.testKey),
+                      onPressed: () {
+                        if (game.route.contains('slots') ||
+                            game.route.contains('blackjack') ||
+                            game.route.contains('poker') ||
+                            game.route.contains('poker-table')) {
+                          Navigator.pushNamed(context, game.route);
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('${game.name} coming soon!'),
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00FF88),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                      ),
+                      child: Text(
+                        game.buttonText,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
                     ),
                   ),
                 ],

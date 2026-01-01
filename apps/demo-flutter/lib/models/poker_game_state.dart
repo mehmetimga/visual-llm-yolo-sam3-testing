@@ -192,6 +192,14 @@ class PokerTableState {
 
   /// Start a new hand
   void startNewHand() {
+    // Auto-refill chips for all players who are out
+    for (final player in players) {
+      if (player.chips <= 0) {
+        player.chips = 1000;
+        _addLog('${player.avatar} ${player.name} reloaded with \$1000');
+      }
+    }
+
     // Reset all players
     for (final player in players) {
       player.reset();

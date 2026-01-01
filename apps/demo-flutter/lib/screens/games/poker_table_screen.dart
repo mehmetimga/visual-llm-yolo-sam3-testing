@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../models/poker_game_state.dart';
+import '../../models/debug_state.dart';
 import '../../services/poker_ai_service.dart';
 import '../../widgets/playing_card.dart';
 import '../../widgets/rive_action_buttons.dart';
@@ -55,7 +56,11 @@ class PokerTheme {
 // ═══════════════════════════════════════════════════════════════════════════
 
 class PokerTableScreen extends StatefulWidget {
-  const PokerTableScreen({super.key});
+  /// Optional debug state for YOLO training data capture.
+  /// When provided, the game will start in this specific state.
+  final DebugState? debugState;
+  
+  const PokerTableScreen({super.key, this.debugState});
 
   @override
   State<PokerTableScreen> createState() => _PokerTableScreenState();
@@ -86,6 +91,62 @@ class _PokerTableScreenState extends State<PokerTableScreen>
     _pulseAnimation = Tween<double>(begin: 0.6, end: 1.0).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
+    
+    // Apply debug state if provided (for YOLO training)
+    if (widget.debugState != null && widget.debugState!.phase != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _applyDebugState(widget.debugState!);
+      });
+    }
+  }
+  
+  /// Apply debug state for YOLO training data capture
+  void _applyDebugState(DebugState debugState) {
+    print('🎯 Applying debug state: ${debugState.name}');
+    
+    setState(() {
+      // Start a new hand first to initialize cards
+      gameState.startNewHand();
+      
+      // Force the phase
+      if (debugState.phase != null) {
+        gameState.phase = debugState.phase!;
+      }
+      
+      // Set current bet for check/call scenarios
+      if (debugState.currentBet != null) {
+        gameState.currentBet = debugState.currentBet!;
+      }
+      
+      // Deal community cards based on phase
+      if (debugState.communityCardCount != null && debugState.communityCardCount! > 0) {
+        // Deal community cards from deck
+        for (int i = 0; i < debugState.communityCardCount! && gameState.communityCards.length < debugState.communityCardCount!; i++) {
+          if (gameState.deck.isNotEmpty) {
+            gameState.communityCards.add(gameState.deck.removeLast());
+          }
+        }
+      }
+      
+      // Set pot amount
+      if (debugState.potAmount != null) {
+        gameState.pot = debugState.potAmount!;
+      }
+      
+      // Make sure it's the human player's turn
+      gameState.currentPlayerIndex = 0; // Human is always index 0
+      
+      // Update player turn flags
+      for (int i = 0; i < gameState.players.length; i++) {
+        gameState.players[i].isCurrentTurn = (i == gameState.currentPlayerIndex);
+      }
+    });
+    
+    print('   Phase: ${gameState.phase.name}');
+    print('   Community cards: ${gameState.communityCards.length}');
+    print('   Current bet: ${gameState.currentBet}');
+    print('   Pot: ${gameState.pot}');
+    print('   Your turn: ${gameState.currentPlayer.isHuman}');
   }
 
   @override
@@ -245,9 +306,15 @@ class _PokerTableScreenState extends State<PokerTableScreen>
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.arrow_back_ios, color: Colors.white54, size: 20),
-            onPressed: () => Navigator.pop(context),
+          Semantics(
+            identifier: 'poker_back_button',
+            label: 'poker_back_button',
+            button: true,
+            child: IconButton(
+              key: const Key('poker_back_button'),
+              icon: const Icon(Icons.arrow_back_ios, color: Colors.white54, size: 20),
+              onPressed: () => Navigator.pop(context),
+            ),
           ),
           const Spacer(),
           // Table name/level indicator only

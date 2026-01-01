@@ -36,9 +36,14 @@ def get_model():
             model_path = os.environ.get("YOLO_MODEL_PATH", None)
             
             if model_path is None:
-                # Check for poker-trained model first
+                # Check for Rive poker model first, then old poker model
+                rive_model = os.path.join(os.path.dirname(__file__), "rive_poker_model.pt")
                 poker_model = os.path.join(os.path.dirname(__file__), "poker_model.pt")
-                if os.path.exists(poker_model):
+                
+                if os.path.exists(rive_model):
+                    model_path = rive_model
+                    logger.info("Using Rive poker-trained model")
+                elif os.path.exists(poker_model):
                     model_path = poker_model
                     logger.info("Using poker-trained model")
                 else:
@@ -92,7 +97,21 @@ UI_TYPE_MAPPING = {
 }
 
 # Poker-specific classes (from poker_model.pt training v2)
+# Classes for Rive poker UI model
 POKER_CLASSES = {
+    0: "btn_fold",
+    1: "btn_check",
+    2: "btn_call",
+    3: "btn_raise",
+    4: "btn_deal",
+    5: "hole_card",
+    6: "board_card",
+    7: "pot_amount",
+    8: "bet_slider",
+}
+
+# Legacy classes for old poker model (if needed)
+LEGACY_POKER_CLASSES = {
     0: "btn_fold",
     1: "btn_check_call",
     2: "btn_raise",

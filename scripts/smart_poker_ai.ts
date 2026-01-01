@@ -9,6 +9,12 @@
  * 3. Send detected info to LLM for decision
  * 4. Execute the recommended action
  * 5. Repeat for each hand
+ * 
+ * Usage:
+ *   pnpm tsx scripts/smart_poker_ai.ts                    # Normal play
+ *   pnpm tsx scripts/smart_poker_ai.ts --capture          # Capture mode for YOLO training
+ *   pnpm tsx scripts/smart_poker_ai.ts --capture --hands=200  # Capture 200 hands
+ *   pnpm tsx scripts/smart_poker_ai.ts --capture-states   # Capture all debug states systematically
  */
 
 import { remote } from 'webdriverio';
@@ -19,10 +25,30 @@ const OLLAMA_URL = 'http://localhost:11434';
 const DETECTOR_URL = 'http://localhost:8001';
 const OUTPUT_DIR = join(process.cwd(), 'apps/orchestrator/out/poker_ai');
 
-// Ensure output directory exists
+// Parse command line arguments
+const args = process.argv.slice(2);
+const CAPTURE_MODE = args.includes('--capture');
+const CAPTURE_STATES_MODE = args.includes('--capture-states');
+const handsArg = args.find(a => a.startsWith('--hands='));
+const NUM_HANDS_ARG = handsArg ? parseInt(handsArg.split('=')[1]) : 10;
+
+// Debug states to capture (matches Flutter DebugState.trainingStates)
+const DEBUG_STATES = ['CHECK', 'CALL', 'DEAL', 'FLOP', 'TURN', 'RIVER', 'RAISE', 'NORMAL'];
+const SCREENSHOTS_PER_STATE = 30; // Capture 30 screenshots per state
+
+// Training data capture directory
+const CAPTURE_DIR = join(process.cwd(), 'services/detector/training_data/rive_poker_images');
+
+// Ensure output directories exist
 if (!existsSync(OUTPUT_DIR)) {
   mkdirSync(OUTPUT_DIR, { recursive: true });
 }
+if (CAPTURE_MODE && !existsSync(CAPTURE_DIR)) {
+  mkdirSync(CAPTURE_DIR, { recursive: true });
+}
+
+// Screenshot counter for unique naming
+let screenshotCounter = 0;
 
 interface GameState {
   phase: 'pre_deal' | 'pre_flop' | 'flop' | 'turn' | 'river' | 'showdown' | 'unknown';
@@ -35,20 +61,26 @@ interface GameState {
 }
 
 interface YOLODetection {
-  class: string;
-  confidence: number;
+  id: string;
+  type: string;
+  text: string;
+  role: string;
   bbox: { x: number; y: number; w: number; h: number };
-  label?: string;
+  confidence: number;
 }
 
-// Button positions (iPhone 16 Pro Max: 430x932)
+// Global detection state for YOLO dynamic coordinates
+let detectedPositions: Record<string, { x: number; y: number }> = {};
+const SCREEN_SCALE = 3.0; // 1320 (screenshot) / 440 (Appium) = 3.0
+
+// NEW Rive button fallback positions (calibrated for 440x956 screen)
 const BUTTON_POSITIONS = {
-  deal: { x: 215, y: 575 },
-  fold: { x: 55, y: 900 },
-  check: { x: 160, y: 900 },
-  call: { x: 160, y: 900 },
-  raise: { x: 265, y: 900 },
-  all_in: { x: 370, y: 900 },
+  deal: { x: 220, y: 550 },       // Center, above Rive panel
+  fold: { x: 60, y: 780 },        // Bottom left of action area
+  check: { x: 60, y: 680 },       // Top left of action area
+  call: { x: 60, y: 680 },        // Same as check
+  raise: { x: 190, y: 680 },      // Center of action area
+  all_in: { x: 380, y: 680 },     // Top right shortcut
 };
 
 async function takeScreenshot(driver: WebdriverIO.Browser, name: string): Promise<string> {
@@ -56,6 +88,17 @@ async function takeScreenshot(driver: WebdriverIO.Browser, name: string): Promis
   const path = join(OUTPUT_DIR, `${name}.png`);
   writeFileSync(path, screenshot, 'base64');
   console.log(`📸 Screenshot saved: ${name}.png`);
+  
+  // In capture mode, also save to training directory with unique timestamp
+  if (CAPTURE_MODE) {
+    screenshotCounter++;
+    const timestamp = Date.now();
+    const captureName = `rive_${name}_${timestamp}_${screenshotCounter}`;
+    const capturePath = join(CAPTURE_DIR, `${captureName}.png`);
+    writeFileSync(capturePath, screenshot, 'base64');
+    console.log(`   📷 Training capture: ${captureName}.png`);
+  }
+  
   return path;
 }
 
@@ -69,20 +112,38 @@ async function detectWithYOLO(screenshotPath: string): Promise<YOLODetection[]> 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         image: base64,
-        threshold: 0.3
+        threshold: 0.2 // Use lower threshold for more reliable detection
       })
     });
     
     if (!response.ok) {
-      console.log('   ⚠️ YOLO detection failed, using fallback');
+      console.log('   ⚠️ YOLO detection failed');
       return [];
     }
     
     const result = await response.json();
-    console.log(`   🔍 YOLO detected ${result.detections?.length || 0} elements`);
-    return result.detections || [];
+    const detections = result.detections || [];
+    console.log(`   🔍 YOLO detected ${detections.length} elements`);
+    
+    // Clear old positions
+    detectedPositions = {};
+    
+    // Map detections to scaled coordinates
+    for (const det of detections) {
+      const class_name = det.text || det.type || '';
+      const actionKey = class_name.replace('btn_', '').toUpperCase();
+      
+      // Calculate center coordinate and scale to Appium space
+      const appiumX = Math.round((det.bbox.x + det.bbox.w / 2) / SCREEN_SCALE);
+      const appiumY = Math.round((det.bbox.y + det.bbox.h / 2) / SCREEN_SCALE);
+      
+      detectedPositions[actionKey] = { x: appiumX, y: appiumY };
+      console.log(`      📍 ${actionKey}: [${appiumX}, ${appiumY}] (${Math.round(det.confidence * 100)}%)`);
+    }
+    
+    return detections;
   } catch (error) {
-    console.log('   ⚠️ YOLO service unavailable, using vision LLM');
+    console.log('   ⚠️ YOLO service error');
     return [];
   }
 }
@@ -218,12 +279,20 @@ Your action:`;
 }
 
 async function executeAction(driver: WebdriverIO.Browser, action: string): Promise<void> {
-  const actionKey = action.toLowerCase().replace(' ', '_').replace('all_in', 'all_in');
-  const pos = BUTTON_POSITIONS[actionKey as keyof typeof BUTTON_POSITIONS];
+  const actionKey = action.toUpperCase().replace(' ', '_');
+  
+  // Use detected position if available, otherwise fallback to calibrated ones
+  let pos = detectedPositions[actionKey];
+  let usedYolo = !!pos;
+  
+  if (!pos) {
+    const fallbackKey = action.toLowerCase().replace(' ', '_');
+    pos = BUTTON_POSITIONS[fallbackKey as keyof typeof BUTTON_POSITIONS];
+  }
   
   if (!pos) {
     console.log(`   ⚠️ Unknown action position: ${action}, trying text search`);
-    // Try to find by text
+    // ... rest of the code for text search fallback
     try {
       const element = await driver.$(`//*[contains(@label, "${action}") or contains(@name, "${action}")]`);
       if (await element.isExisting()) {
@@ -235,9 +304,11 @@ async function executeAction(driver: WebdriverIO.Browser, action: string): Promi
     return;
   }
   
+  console.log(`   👆 Tapping ${action} at (${pos.x}, ${pos.y})${usedYolo ? ' [YOLO]' : ' [FALLBACK]'} with 100ms pause...`);
   await driver.action('pointer')
     .move({ x: pos.x, y: pos.y })
     .down()
+    .pause(100) // Crucial for Rive buttons
     .up()
     .perform();
   
@@ -438,11 +509,63 @@ async function typeIntoField(driver: WebdriverIO.Browser, fieldLabel: string, te
 }
 
 async function navigateToPoker(driver: WebdriverIO.Browser): Promise<void> {
-  console.log('\n🎰 Navigating to Poker Table...');
+  console.log('\n➡️ Navigating from Lobby to Poker Table...');
   
-  // Scroll down twice to find Poker Table
+  // Try to find the PLAY POKER button by label or test ID
+  const selectors = [
+    '//*[@label="PLAY POKER"]',
+    '~poker_table_play_button',
+    '//*[contains(@label, "PLAY POKER")]',
+    '//*[contains(@label, "Poker Table")]'
+  ];
+
+  for (const selector of selectors) {
+    try {
+      const playBtn = await driver.$(selector);
+      if (await playBtn.isExisting()) {
+        await playBtn.click();
+        console.log(`   ✅ Clicked Poker Table via: ${selector}`);
+        await driver.pause(3000);
+        return;
+      }
+    } catch (e) {}
+  }
+
+  // Fallback to scrolling if not found
+  console.log('   📜 Scrolling to find Poker Table...');
   const { width, height } = await driver.getWindowRect();
   for (let i = 0; i < 2; i++) {
+    await driver.action('pointer')
+      .move({ x: width / 2, y: height * 0.7 })
+      .down()
+      .move({ x: width / 2, y: height * 0.3, duration: 300 })
+      .up()
+      .perform();
+    await driver.pause(1000);
+    
+    // Try selectors again after scrolling
+    for (const selector of selectors) {
+      try {
+        const playBtn = await driver.$(selector);
+        if (await playBtn.isExisting()) {
+          await playBtn.click();
+          console.log(`   ✅ Clicked Poker Table via: ${selector}`);
+          await driver.pause(3000);
+          return;
+        }
+      } catch (e) {}
+    }
+  }
+
+  console.log('   ⚠️ Could not find PLAY POKER button, assuming already on table');
+}
+
+async function navigateToDebugSetup(driver: WebdriverIO.Browser): Promise<void> {
+  console.log('\n🎯 Navigating to Debug Setup Screen...');
+  
+  // Scroll down to find Debug button
+  const { width, height } = await driver.getWindowRect();
+  for (let i = 0; i < 3; i++) {
     await driver.action('pointer')
       .move({ x: width / 2, y: height * 0.7 })
       .down()
@@ -452,27 +575,214 @@ async function navigateToPoker(driver: WebdriverIO.Browser): Promise<void> {
     await driver.pause(500);
   }
   
-  // Tap PLAY POKER button
+  // Tap DEBUG MODE button
   try {
-    const playPokerBtn = await driver.$('//*[contains(@label, "PLAY POKER") or contains(@name, "PLAY POKER")]');
-    if (await playPokerBtn.isExisting()) {
-      await playPokerBtn.click();
-      console.log('   ✅ Found and tapped PLAY POKER button');
+    const debugBtn = await driver.$('//*[contains(@label, "DEBUG MODE") or contains(@name, "DEBUG MODE")]');
+    if (await debugBtn.isExisting()) {
+      await debugBtn.click();
+      console.log('   ✅ Found and tapped DEBUG MODE button');
+      await driver.pause(2000);
+      return;
     }
-  } catch {
-    // Fallback to hardcoded position
-    await driver.action('pointer')
-      .move({ x: 190, y: 770 })
-      .down()
-      .up()
-      .perform();
-    console.log('   ⚡ Tapped poker table via hardcoded position');
+  } catch {}
+  
+  // Fallback: Try to find by accessibility id
+  try {
+    const debugBtn = await driver.$('~debug_poker_button');
+    if (await debugBtn.isExisting()) {
+      await debugBtn.click();
+      console.log('   ✅ Tapped debug button via accessibility id');
+      await driver.pause(2000);
+      return;
+    }
+  } catch {}
+  
+  console.log('   ⚠️ Could not find DEBUG MODE button - make sure app is in debug mode');
+  throw new Error('Debug mode not available');
+}
+
+async function selectDebugState(driver: WebdriverIO.Browser, stateName: string): Promise<void> {
+  console.log(`\n🎯 Selecting debug state: ${stateName}`);
+  
+  await driver.pause(500);
+  
+  // Try to find and tap the state by label
+  try {
+    const stateBtn = await driver.$(`//*[contains(@label, "${stateName}") or contains(@name, "${stateName}")]`);
+    if (await stateBtn.isExisting()) {
+      await stateBtn.click();
+      console.log(`   ✅ Selected state: ${stateName}`);
+      await driver.pause(2000);
+      return;
+    }
+  } catch {}
+  
+  // Fallback: Scroll and try again
+  const { width, height } = await driver.getWindowRect();
+  await driver.action('pointer')
+    .move({ x: width / 2, y: height * 0.7 })
+    .down()
+    .move({ x: width / 2, y: height * 0.4, duration: 200 })
+    .up()
+    .perform();
+  await driver.pause(500);
+  
+  try {
+    const stateBtn = await driver.$(`//*[contains(@label, "${stateName}") or contains(@name, "${stateName}")]`);
+    if (await stateBtn.isExisting()) {
+      await stateBtn.click();
+      console.log(`   ✅ Selected state: ${stateName} (after scroll)`);
+      await driver.pause(2000);
+      return;
+    }
+  } catch {}
+  
+  console.log(`   ⚠️ Could not find state: ${stateName}`);
+}
+
+async function goBackToLobby(driver: WebdriverIO.Browser): Promise<void> {
+  console.log('   ⬅️ Going back to lobby...');
+  
+  // Tap back button (usually at top-left)
+  try {
+    const backBtn = await driver.$('~BackButton');
+    if (await backBtn.isExisting()) {
+      await backBtn.click();
+      await driver.pause(1000);
+      return;
+    }
+  } catch {}
+  
+  // Fallback: tap at top-left corner
+  await driver.action('pointer')
+    .move({ x: 30, y: 60 })
+    .down()
+    .up()
+    .perform();
+  await driver.pause(1000);
+}
+
+async function captureAllDebugStates(driver: WebdriverIO.Browser): Promise<void> {
+  console.log('\n📷 ===== CAPTURING ALL DEBUG STATES =====\n');
+  console.log(`   States to capture: ${DEBUG_STATES.join(', ')}`);
+  console.log(`   Screenshots per state: ${SCREENSHOTS_PER_STATE}`);
+  console.log(`   Total expected: ${DEBUG_STATES.length * SCREENSHOTS_PER_STATE} screenshots\n`);
+  
+  for (const state of DEBUG_STATES) {
+    console.log(`\n${'='.repeat(50)}`);
+    console.log(`📸 Capturing state: ${state}`);
+    console.log('='.repeat(50));
+    
+    // Navigate to debug setup screen
+    await goBackToLobby(driver);
+    await driver.pause(500);
+    await navigateToDebugSetup(driver);
+    
+    // Select the state
+    await selectDebugState(driver, state);
+    
+    // Capture screenshots
+    for (let i = 1; i <= SCREENSHOTS_PER_STATE; i++) {
+      const timestamp = Date.now();
+      const name = `${state.toLowerCase()}_${timestamp}_${i}`;
+      await takeScreenshot(driver, name);
+      
+      // For interactive states, perform some actions to capture variations
+      if (state !== 'DEAL' && state !== 'NORMAL') {
+        // Wait briefly between captures
+        await driver.pause(500);
+        
+        // Every 5 screenshots, try to interact (if not in DEAL state)
+        if (i % 5 === 0 && i < SCREENSHOTS_PER_STATE - 5) {
+          console.log(`   🎲 Performing action for variation...`);
+          try {
+            // Tap a random button for variation
+            const actions = ['CHECK', 'CALL', 'FOLD'];
+            const randomAction = actions[Math.floor(Math.random() * actions.length)];
+            await executePokerAction(driver, randomAction);
+            await driver.pause(1000);
+            
+            // After action, we might be in a new state - go back and re-enter
+            await goBackToLobby(driver);
+            await navigateToDebugSetup(driver);
+            await selectDebugState(driver, state);
+          } catch {}
+        }
+      } else {
+        await driver.pause(300);
+      }
+    }
+    
+    console.log(`   ✅ Captured ${SCREENSHOTS_PER_STATE} screenshots for ${state}`);
   }
   
-  await driver.pause(2000);
+  console.log(`\n${'='.repeat(50)}`);
+  console.log('📷 STATE CAPTURE COMPLETE!');
+  console.log('='.repeat(50));
+  console.log(`   Total screenshots captured: ${screenshotCounter}`);
+  console.log(`   Saved to: ${CAPTURE_DIR}`);
 }
 
 async function analyzeScreenshotWithLLM(screenshotPath: string): Promise<{ onPokerTable: boolean; availableActions: string[]; suggestion: string }> {
+  // YOLO-first approach: Try YOLO detection, fall back to VLM only if needed
+  
+  // Step 1: Try YOLO detection
+  const yoloDetections = await detectWithYOLO(screenshotPath);
+  
+  if (yoloDetections.length > 0) {
+    // Parse YOLO detections into buttons
+    const detectedButtons: string[] = [];
+    let hasDealButton = false;
+    
+    for (const det of yoloDetections) {
+      const type = det.text || det.type || '';
+      if (type.includes('fold')) detectedButtons.push('FOLD');
+      if (type.includes('check')) detectedButtons.push('CHECK');
+      if (type.includes('call')) detectedButtons.push('CALL');
+      if (type.includes('raise')) detectedButtons.push('RAISE');
+      if (type.includes('deal')) {
+        detectedButtons.push('DEAL');
+        hasDealButton = true;
+      }
+    }
+    
+    // Remove duplicates
+    const uniqueButtons = [...new Set(detectedButtons)];
+    
+    // If we see CALL or RAISE, FOLD is always available too (even if not detected)
+    if ((uniqueButtons.includes('CALL') || uniqueButtons.includes('RAISE')) && !uniqueButtons.includes('FOLD')) {
+      uniqueButtons.push('FOLD');
+    }
+    
+    // Note: YOLO labels btn_check and btn_call at same position
+    // The actual button shows CHECK when canCheck=true, CALL when there's a bet
+    // For now, we assume if CALL is detected, CHECK might also be available
+    // The game logic handles this - clicking the same position works for both
+    
+    if (uniqueButtons.length > 0) {
+      // Determine suggestion based on detected buttons
+      let suggestion = 'CHECK';
+      if (hasDealButton) {
+        suggestion = 'DEAL';
+      } else if (uniqueButtons.includes('CHECK')) {
+        suggestion = 'CHECK';
+      } else if (uniqueButtons.includes('CALL')) {
+        suggestion = 'CALL';
+      } else if (uniqueButtons.includes('FOLD')) {
+        suggestion = 'FOLD';
+      }
+      
+      console.log(`   🎯 YOLO: buttons=${uniqueButtons.join(', ')}, suggestion=${suggestion}`);
+      return {
+        onPokerTable: true,
+        availableActions: uniqueButtons,
+        suggestion
+      };
+    }
+  }
+  
+  // Step 2: Fall back to VLM if YOLO didn't find buttons
+  console.log('   📡 Falling back to VLM...');
   try {
     const imageData = readFileSync(screenshotPath);
     const base64 = imageData.toString('base64');
@@ -560,6 +870,17 @@ async function main() {
   console.log('  - UI element detection for game state');
   console.log('  - Ollama LLM (llama3.2) for strategic decisions\n');
   
+  if (CAPTURE_STATES_MODE) {
+    console.log('📷 CAPTURE STATES MODE ENABLED');
+    console.log(`   Will systematically capture all debug states`);
+    console.log(`   States: ${DEBUG_STATES.join(', ')}`);
+    console.log(`   Screenshots per state: ${SCREENSHOTS_PER_STATE}\n`);
+  } else if (CAPTURE_MODE) {
+    console.log('📷 CAPTURE MODE ENABLED');
+    console.log(`   Training images will be saved to: ${CAPTURE_DIR}`);
+    console.log(`   Playing ${NUM_HANDS_ARG} hands for data collection\n`);
+  }
+  
   // Connect to Appium
   const driver = await remote({
     hostname: '127.0.0.1',
@@ -590,24 +911,43 @@ async function main() {
       console.log(`📍 On login screen (found ${allTextFields.length} text fields) - logging in...`);
       await login(driver);
       await driver.pause(2000);
-      await navigateToPoker(driver);
-    } else if (!initialAnalysis.onPokerTable) {
-      // Might be on lobby - try to navigate to poker
-      console.log('📍 Trying to navigate to poker table...');
-      await navigateToPoker(driver);
+    }
+    
+    // CAPTURE STATES MODE: Systematically capture all debug states
+    if (CAPTURE_STATES_MODE) {
+      await captureAllDebugStates(driver);
+      
+      console.log('\n🏆 ===== STATE CAPTURE COMPLETE =====');
+      console.log(`   Total screenshots: ${screenshotCounter}`);
+      console.log(`   Saved to: ${CAPTURE_DIR}`);
+      console.log('\n📋 Next steps:');
+      console.log('   1. Run: python services/detector/fastLabel_rive.py');
+      console.log('   2. Run: python services/detector/train_rive_poker.py');
+      
     } else {
-      console.log('📍 Already on poker table!\n');
+      // Normal mode or capture mode: Navigate to poker and play
+      if (!initialAnalysis.onPokerTable) {
+        console.log('📍 Navigating to poker table...');
+        await navigateToPoker(driver);
+      } else {
+        console.log('📍 Already on poker table!\n');
+      }
+      
+      // Play hands
+      const NUM_HANDS = NUM_HANDS_ARG;
+      for (let i = 1; i <= NUM_HANDS; i++) {
+        await playPokerHand(driver, i);
+      }
+      
+      console.log('\n🏆 ===== AI POKER SESSION COMPLETE =====');
+      console.log(`   Played ${NUM_HANDS} hands using AI intelligence`);
+      console.log(`   Screenshots saved to: ${OUTPUT_DIR}`);
+      
+      if (CAPTURE_MODE) {
+        console.log(`   📷 Training screenshots: ${screenshotCounter} images captured`);
+        console.log(`   📁 Saved to: ${CAPTURE_DIR}`);
+      }
     }
-    
-    // Play 10 hands
-    const NUM_HANDS = 10;
-    for (let i = 1; i <= NUM_HANDS; i++) {
-      await playPokerHand(driver, i);
-    }
-    
-    console.log('\n🏆 ===== AI POKER SESSION COMPLETE =====');
-    console.log(`   Played ${NUM_HANDS} hands using AI intelligence`);
-    console.log(`   Screenshots saved to: ${OUTPUT_DIR}`);
     
   } catch (error) {
     console.error('❌ Error:', error);

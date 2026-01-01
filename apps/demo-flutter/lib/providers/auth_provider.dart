@@ -34,12 +34,17 @@ class AuthProvider extends ChangeNotifier {
 
   void updateBalance(int amount) {
     _balance += amount;
+    if (_balance <= 0) {
+      _balance = 1000;
+    }
     notifyListeners();
   }
 
   void setBalance(int amount) {
     _balance = amount;
+    if (_balance <= 0) {
+      _balance = 1000;
+    }
     notifyListeners();
   }
 }
-
