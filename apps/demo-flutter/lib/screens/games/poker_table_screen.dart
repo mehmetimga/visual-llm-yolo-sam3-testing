@@ -43,11 +43,11 @@ class PokerTheme {
   // ═══════════════════════════════════════════════════════════════════════════
   // LAYOUT CONSTANTS (Y anchors as fractions of table height)
   // ═══════════════════════════════════════════════════════════════════════════
-  static const double topOpponentY = 0.02;      // Top player position
-  static const double sideOpponentY = 0.22;     // Left/Right player position
-  static const double boardAnchorY = 0.48;      // Community cards Y (moved down)
-  static const double potAnchorY = 0.66;        // Pot + chips below board (moved down)
-  static const double heroCardsAnchorY = 0.85;  // Hero cards (moved down)
+  static const double topOpponentY = 0.02;      // Top player (Alex)
+  static const double sideOpponentY = 0.22;     // Side players (Beth/Carl)
+  static const double potAnchorY = 0.30;        // Pot - just under Alex
+  static const double boardAnchorY = 0.50;      // Community cards - below pot
+  static const double heroCardsAnchorY = 0.85;  // Your cards
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -157,6 +157,7 @@ class _PokerTableScreenState extends State<PokerTableScreen>
         gameState.phase != TablePhase.finished) {
       print('');
       print('⏸️  YOUR TURN - waiting for action...');
+      print('   phase=${gameState.phase.name}, tableBet=${gameState.currentBet}, yourBet=${gameState.currentPlayer.currentBet}');
       print('   canCheck=${gameState.canCheck}, amountToCall=${gameState.amountToCall}');
     }
   }
@@ -217,11 +218,16 @@ class _PokerTableScreenState extends State<PokerTableScreen>
                 Expanded(child: _buildPokerTable()),
               ],
             ),
-            // Action buttons overlay at bottom (pushed down 30px)
+            // Action buttons overlay - different position based on game state
             Positioned(
               left: 0,
               right: 0,
-              bottom: -30,  // Push down to not cover pot
+              // When game over: just below community cards (boardAnchorY=0.50 + offset)
+              // During play: at bottom
+              bottom: _isHandComplete ? null : 0,
+              top: _isHandComplete 
+                  ? MediaQuery.of(context).size.height * 0.60  // Just under table cards
+                  : null,
               child: _buildBottomPanel(),
             ),
           ],

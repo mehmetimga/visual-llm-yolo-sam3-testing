@@ -357,8 +357,19 @@ class PokerTableState {
       }
     }
 
-    // Check if betting round is complete
-    if (_isBettingRoundComplete()) {
+    // Check if betting round is complete:
+    // 1. Everyone has matched the current bet
+    // 2. Action is about to return to the last raiser (or everyone has checked)
+    final allMatched = activePlayers.every((p) => p.isAllIn || p.currentBet >= currentBet);
+    final returnsToRaiser = lastRaiserIndex >= 0 && nextIndex == lastRaiserIndex;
+    final playersToAct = activePlayers.where((p) => !p.isAllIn).length;
+    final everyoneChecked = lastRaiserIndex < 0 && actionsThisRound >= playersToAct;
+    
+    print('   🔄 Next: ${players[nextIndex].name}, allMatched=$allMatched, returnsToRaiser=$returnsToRaiser, everyoneChecked=$everyoneChecked');
+    print('      lastRaiserIndex=$lastRaiserIndex (${lastRaiserIndex >= 0 ? players[lastRaiserIndex].name : "none"}), actionsThisRound=$actionsThisRound');
+    
+    if (allMatched && (returnsToRaiser || everyoneChecked)) {
+      print('   ✅ Betting round complete! Advancing phase...');
       _advancePhase();
     } else {
       currentPlayerIndex = nextIndex;
@@ -370,15 +381,35 @@ class PokerTableState {
     // All active players must have matched the current bet (or be all-in)
     for (final player in activePlayers) {
       if (!player.isAllIn && player.currentBet < currentBet) {
-        return false;
+        return false;  // Someone still needs to call
       }
     }
     
     // Count how many players can still act (not folded, not all-in)
     final playersWhoCanAct = activePlayers.where((p) => !p.isAllIn).length;
     
-    // Everyone must have had a chance to respond to any raise
-    // The round is complete when all players who can act have acted
+    // If only one player can act, round is complete (everyone else folded/all-in)
+    if (playersWhoCanAct <= 1) {
+      return true;
+    }
+    
+    // If there was a raise, the round ends when action returns to the raiser
+    // (everyone has had a chance to respond to the raise)
+    if (lastRaiserIndex >= 0) {
+      // Find next active player from last raiser
+      int checkIndex = (lastRaiserIndex + 1) % players.length;
+      while (checkIndex != lastRaiserIndex) {
+        final p = players[checkIndex];
+        if (p.isActive && !p.isAllIn && p.currentBet < currentBet) {
+          return false;  // This player hasn't responded to the raise yet
+        }
+        checkIndex = (checkIndex + 1) % players.length;
+      }
+      // Everyone has responded to the raise
+      return true;
+    }
+    
+    // No raise yet - round completes when everyone has acted (checked or called)
     return actionsThisRound >= playersWhoCanAct;
   }
 

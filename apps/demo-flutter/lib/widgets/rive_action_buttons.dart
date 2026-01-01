@@ -1,12 +1,34 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:rive/rive.dart';
 
 import '../rive/cached_assets.dart';
 import '../rive/cached_fonts.dart';
 import '../rive/shared_font_loader.dart';
+import '../rive/custom_rive_widget_controller.dart';
+import '../rive/rive_dispose_mixin.dart';
+import '../rive/rive_button.dart';
 
-/// Rive Action Buttons widget for poker demo
-/// Full Rive implementation with font loading
+const _logTag = "RiveActionButtons";
+
+/// Debounce duration to prevent double-clicks on Rive buttons
+const _buttonDebounceMs = 300;
+
+/// Safe listener extension (like production utils.dart)
+extension SafeListenerX<T> on ViewModelInstanceObservableValue<T> {
+  void addSafeListener(State state, void Function(T value) callback) {
+    addListener((val) {
+      if (state.mounted) {
+        callback(val);
+      }
+    });
+  }
+}
+
+/// Callback types for action buttons
+typedef ActionCallback = void Function();
+typedef RaiseCallback = void Function(int amount);
+
 class RiveActionButtons extends StatefulWidget {
   final bool isEnabled;
   final bool canCheck;
@@ -15,27 +37,27 @@ class RiveActionButtons extends StatefulWidget {
   final int minRaise;
   final int maxRaise;
   final int pot;
-  final VoidCallback? onFold;
-  final VoidCallback? onCheck;
-  final VoidCallback? onCall;
-  final ValueChanged<int>? onRaise;
-  final VoidCallback? onAllIn;
+  final ActionCallback onFold;
+  final ActionCallback onCheck;
+  final ActionCallback onCall;
+  final RaiseCallback onRaise;
+  final ActionCallback onAllIn;
   final ValueChanged<int>? onSliderChanged;
 
   const RiveActionButtons({
     super.key,
-    this.isEnabled = true,
-    this.canCheck = false,
-    this.callAmount = 0,
-    this.raiseAmount = 20,
-    this.minRaise = 20,
-    this.maxRaise = 500,
-    this.pot = 100,
-    this.onFold,
-    this.onCheck,
-    this.onCall,
-    this.onRaise,
-    this.onAllIn,
+    required this.isEnabled,
+    required this.canCheck,
+    required this.callAmount,
+    required this.raiseAmount,
+    required this.minRaise,
+    required this.maxRaise,
+    required this.pot,
+    required this.onFold,
+    required this.onCheck,
+    required this.onCall,
+    required this.onRaise,
+    required this.onAllIn,
     this.onSliderChanged,
   });
 
@@ -43,58 +65,69 @@ class RiveActionButtons extends StatefulWidget {
   State<RiveActionButtons> createState() => _RiveActionButtonsState();
 }
 
-class _RiveActionButtonsState extends State<RiveActionButtons> {
-  RiveWidgetController? _controller;
-  ViewModelInstance? _vmi;
-  bool _isLoading = true;
-  bool _isUpdatingState = false;  // Prevent callbacks during state updates
-  bool _isProcessingClick = false;  // Debounce rapid clicks
-  String? _errorMessage;
-
-  // Button ViewModelInstances
-  _RiveButton? _foldButton;
-  _RiveButton? _checkButton;
-  _RiveButton? _callButton;
-  _RiveButton? _raiseButton;
-  _RiveButton? _betButton;
-  _RiveButton? _allInButton;
-
-  // Bet shortcuts
-  _RiveButton? _betSize1;
-  _RiveButton? _betSize2;
-  _RiveButton? _betSize3;
-  _RiveButton? _betSize4;
-
-  // Slider
-  ViewModelInstanceNumber? _sliderValue;
-  ViewModelInstanceBoolean? _sliderVisible;
+class _RiveActionButtonsState extends State<RiveActionButtons> with RiveDisposeMixin {
+  CustomRiveWidgetController? _controller;
   
-  // Bet size input (the "$value" display)
-  ViewModelInstanceString? _betSizeInputValue;
-
-  // State machine inputs
+  // State machine triggers
   TriggerInput? _enterTrigger;
-  BooleanInput? _sliderVisibleInput;
+  TriggerInput? _enterStateTrigger;
+  TriggerInput? _exitTrigger;
+  TriggerInput? _exitStateTrigger;
+  BooleanInput? _sliderVisible;
+
+  // VMI properties
+  ViewModelInstanceNumber? _sliderValue;
+  ViewModelInstanceString? _knobInputValue;
+  ViewModelInstanceBoolean? _betSizeInputVisible;
+
+  // Action buttons (like production)
+  late RiveButton _callButton;
+  late RiveButton _checkButton;
+  late RiveButton _foldButton;
+  late RiveButton _raiseButton;
+  late RiveButton _betButton;
+  late List<RiveButton> _shortcutButtons;
+
+  bool _isLoading = true;
+  bool _isClosed = false;
+  bool _isEntering = false;
+  bool _isHovered = false;
+  String? _errorMessage;
+  
+  int _currentBet = 0;
+  int _lastClickTime = 0;  // Debounce timestamp
+
+  /// Check if button click should be processed (debounce)
+  bool _shouldProcessClick() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastClickTime < _buttonDebounceMs) {
+      debugPrint('$_logTag: Click debounced (${now - _lastClickTime}ms since last click)');
+      return false;
+    }
+    _lastClickTime = now;
+    return true;
+  }
 
   @override
   void initState() {
     super.initState();
+    riveLogTag = _logTag;
+    _currentBet = widget.raiseAmount;
     _loadRiveFile();
   }
 
   Future<void> _loadRiveFile() async {
+    debugPrint('$_logTag: Loading Rive file with fonts...');
+
+    // Ensure fonts are loaded
+    if (!CachedFonts.instance.hasLoadedFonts) {
+      debugPrint('$_logTag: Fonts not preloaded, loading now...');
+      await _preloadFonts();
+    }
+    debugPrint('$_logTag: Fonts ready (${CachedFonts.instance.fontCount} fonts)');
+
     try {
-      debugPrint('RiveActionButtons: Loading Rive file with fonts...');
-
-      // Ensure fonts are loaded
-      if (!CachedFonts.instance.hasLoadedFonts) {
-        debugPrint('RiveActionButtons: Fonts not preloaded, loading now...');
-        await _preloadFonts();
-      }
-
-      debugPrint('RiveActionButtons: Fonts ready (${CachedFonts.instance.fontCount} fonts)');
-
-      // Load Rive file with font loader
+      // Load Rive file with font loader (like production)
       final file = await CachedRiveFiles.instance.asset(
         'assets/rive/m-action-buttons.riv',
         assetLoader: SharedFontAssetsLoader.create(),
@@ -103,51 +136,117 @@ class _RiveActionButtonsState extends State<RiveActionButtons> {
       if (file == null) {
         throw Exception('Failed to load Rive file');
       }
-      debugPrint('RiveActionButtons: Rive file loaded');
+      debugPrint('$_logTag: Rive file loaded');
 
-      // Create controller
-      _controller = RiveWidgetController(
+      // Create controller (like production)
+      final controller = CustomRiveWidgetController(
         file,
         artboardSelector: ArtboardNamed('Action Buttons'),
+        primaryButtonOnly: false,  // Mobile
       );
-      debugPrint('RiveActionButtons: Controller created');
+      debugPrint('$_logTag: Controller created');
 
-      // Bind view model
-      _vmi = _controller!.dataBind(DataBind.auto());
-      debugPrint('RiveActionButtons: VMI bound');
+      // AutoDataBind (like production)
+      final vmi = controller.autoDataBind(this, DataBind.auto(), instanceName: 'Action Buttons');
+      debugPrint('$_logTag: VMI bound');
 
-      // Log available properties
-      _logVmiProperties();
+      // Create RiveButtons from nested VMIs (EXACTLY like production)
+      _callButton = RiveButton.fromNestedVmi(vmi, "Action Button Call");
+      _checkButton = RiveButton.fromNestedVmi(vmi, "Action Button Check");
+      _foldButton = RiveButton.fromNestedVmi(vmi, "Action Button Fold");
+      _raiseButton = RiveButton.fromNestedVmi(vmi, "Action Button Raise");
+      _betButton = RiveButton.fromNestedVmi(vmi, "Action Button Bet");
+      debugPrint('$_logTag: Action buttons created');
 
-      // Setup buttons
-      _setupButtons();
+      // Bet shortcut buttons
+      final riveBet1 = RiveButton.fromNestedVmi(vmi, "Bet Size 1");
+      final riveBet2 = RiveButton.fromNestedVmi(vmi, "Bet Size 2");
+      final riveBet3 = RiveButton.fromNestedVmi(vmi, "Bet Size 3");
+      final riveBet4 = RiveButton.fromNestedVmi(vmi, "Bet Size 4");
+      _shortcutButtons = [riveBet1, riveBet2, riveBet3, riveBet4];
+      debugPrint('$_logTag: Shortcut buttons created');
 
-      // Setup state machine inputs
-      _setupStateMachine();
+      // VMI properties (like production)
+      _sliderValue = vmi.autoNumber(this, "Slider Value");
+      final vmiBetSizeEditInput = vmi.autoViewModelInstance(this, "Bet Size Text Input")!;
+      _knobInputValue = vmiBetSizeEditInput.autoString(this, "Value");
+      _knobInputValue?.value = "";
+      _betSizeInputVisible = vmiBetSizeEditInput.autoBoolean(this, "Visible");
 
-      // Fire enter animation
-      // Try Enter State first (immediate, no animation), fall back to Enter
-      if (_enterStateTrigger != null) {
-        _enterStateTrigger!.fire();
-        debugPrint('RiveActionButtons: Enter State trigger fired (immediate)');
-      } else {
-        _enterTrigger?.fire();
-        debugPrint('RiveActionButtons: Enter trigger fired (animated)');
+      // Listen for state triggers (like production lines 252-254)
+      vmi.autoTrigger(this, "enter state entered")?.addSafeListener(this, (_) => _handleEnterState());
+      vmi.autoTrigger(this, "idle state entered")?.addSafeListener(this, (_) => _handleExitState());
+      vmi.autoTrigger(this, "exit state entered")?.addSafeListener(this, (_) => _handleExitState());
+      debugPrint('$_logTag: State triggers bound');
+
+      // Add hover listeners (like production line 269)
+      final buttons = [_callButton, _checkButton, _foldButton, _raiseButton, _betButton, ..._shortcutButtons];
+      for (final button in buttons) {
+        button.hover.addSafeListener(this, (hovered) => setState(() => _isHovered = hovered));
       }
 
-      // Set initial state
-      _updateButtonStates();
+      // Add click listeners with debounce (like production lines 273-274)
+      _foldButton.clicked.addSafeListener(this, (_) {
+        if (!_shouldProcessClick()) return;
+        debugPrint('$_logTag: FOLD clicked');
+        widget.onFold();
+      });
+      _checkButton.clicked.addSafeListener(this, (_) {
+        if (!_shouldProcessClick()) return;
+        debugPrint('$_logTag: CHECK clicked');
+        widget.onCheck();
+      });
+      _callButton.clicked.addSafeListener(this, (_) {
+        if (!_shouldProcessClick()) return;
+        debugPrint('$_logTag: CALL clicked');
+        widget.onCall();
+      });
+      _raiseButton.clicked.addSafeListener(this, (_) {
+        if (!_shouldProcessClick()) return;
+        debugPrint('$_logTag: RAISE clicked');
+        widget.onRaise(_currentBet);
+      });
+      _betButton.clicked.addSafeListener(this, (_) {
+        if (!_shouldProcessClick()) return;
+        debugPrint('$_logTag: BET clicked');
+        widget.onRaise(_currentBet);  // Use onRaise since mobile layout uses same callback
+      });
 
-      if (mounted) {
-        setState(() => _isLoading = false);
+      // Hide shortcuts initially (like production)
+      for (final shortcut in _shortcutButtons) {
+        shortcut.visible.value = false;
       }
+
+      // State machine inputs (like production)
+      final sm = controller.stateMachine;
+      _enterTrigger = sm.autoTrigger(this, 'Enter');
+      _enterStateTrigger = sm.autoTrigger(this, 'Enter State');
+      _exitTrigger = sm.autoTrigger(this, 'Exit');
+      _exitStateTrigger = sm.autoTrigger(this, 'Exit State');
+      _sliderVisible = sm.autoBoolean(this, 'Slider Visible');
+      debugPrint('$_logTag: State machine inputs bound');
+
+      // Set texts IMMEDIATELY before setting controller (prevent flash of default text)
+      _setInitialButtonTexts();
+      
+      // Set controller and update state (like production lines 306-313)
+      setState(() {
+        _controller = controller;
+        _handleButtonsVisibility();
+        _handleButtonsTexts();
+        if (!_isClosed) {
+          _showRiveButtons();
+        }
+        _isLoading = false;
+      });
+
     } catch (e, stack) {
-      debugPrint('RiveActionButtons: Error: $e');
+      debugPrint('$_logTag: Error: $e');
       debugPrint('$stack');
       if (mounted) {
         setState(() {
-          _isLoading = false;
           _errorMessage = e.toString();
+          _isLoading = false;
         });
       }
     }
@@ -155,284 +254,241 @@ class _RiveActionButtonsState extends State<RiveActionButtons> {
 
   Future<void> _preloadFonts() async {
     final fonts = [
-      'assets/fonts/DM Sans-Regular.ttf',
-      'assets/fonts/DM Sans-Medium.ttf',
       'assets/fonts/DM Sans-Bold.ttf',
-      'assets/fonts/IBM Plex Sans Condensed-Regular.ttf',
-      'assets/fonts/IBM Plex Sans Condensed-Medium.ttf',
-      'assets/fonts/IBM Plex Sans Condensed-SemiBold.ttf',
+      'assets/fonts/DM Sans-Regular.ttf',
       'assets/fonts/IBM Plex Sans Condensed-Bold.ttf',
-      'assets/fonts/Aldrich-Regular.ttf',
+      'assets/fonts/IBM Plex Sans Condensed-Regular.ttf',
     ];
-
     for (final font in fonts) {
-      await CachedFonts.instance.addFont(font);
-    }
-  }
-
-  void _logVmiProperties() {
-    if (_vmi == null) return;
-
-    debugPrint('=== VMI Properties ===');
-    for (final prop in _vmi!.properties) {
-      debugPrint('  ${prop.name} (${prop.runtimeType})');
-    }
-    debugPrint('=====================');
-  }
-
-  void _setupButtons() {
-    if (_vmi == null) return;
-
-    // Main action buttons
-    _foldButton = _bindButton('Action Button Fold');
-    _checkButton = _bindButton('Action Button Check');
-    _callButton = _bindButton('Action Button Call');
-    _raiseButton = _bindButton('Action Button Raise');
-    _betButton = _bindButton('Action Button Bet');
-    _allInButton = _bindButton('Action Button All-in');
-
-    // Bet shortcuts
-    _betSize1 = _bindButton('Bet Size 1');
-    _betSize2 = _bindButton('Bet Size 2');
-    _betSize3 = _bindButton('Bet Size 3');
-    _betSize4 = _bindButton('Bet Size 4');
-
-    // Slider value
-    _sliderValue = _vmi!.number('Slider Value');
-    
-    // Bet size input (the "$value" display in the middle)
-    try {
-      final betSizeInputVmi = _vmi!.viewModel('Bet Size Text Input');
-      _betSizeInputValue = betSizeInputVmi?.string('Value');
-      debugPrint('RiveActionButtons: Bound Bet Size Text Input');
-    } catch (e) {
-      debugPrint('RiveActionButtons: Could not bind Bet Size Text Input: $e');
-    }
-
-    // Setup click listeners with debounce protection
-    _foldButton?.clicked?.addListener((_) => _handleClick('FOLD', () => widget.onFold?.call()));
-    _checkButton?.clicked?.addListener((_) => _handleClick('CHECK', () => widget.onCheck?.call()));
-    _callButton?.clicked?.addListener((_) => _handleClick('CALL', () => widget.onCall?.call()));
-    // RAISE button handles both BET and RAISE in mobile
-    _raiseButton?.clicked?.addListener((_) => _handleClick(
-      widget.canCheck ? 'BET' : 'RAISE', 
-      () => widget.onRaise?.call(widget.raiseAmount)
-    ));
-    // BET button not used in mobile (hidden)
-    _betButton?.clicked?.addListener((_) => _handleClick('BET', () => widget.onRaise?.call(widget.raiseAmount)));
-    // ALL-IN not used in mobile layout
-    _allInButton?.clicked?.addListener((_) => _handleClick('ALL-IN', () => widget.onAllIn?.call()));
-
-    // Bet shortcuts click listeners (matches production order)
-    _betSize1?.clicked?.addListener((_) {
-      debugPrint('All-in clicked');
-      widget.onSliderChanged?.call(widget.maxRaise);  // All-in = max
-    });
-    _betSize2?.clicked?.addListener((_) {
-      debugPrint('Pot clicked');
-      widget.onSliderChanged?.call(widget.pot.clamp(widget.minRaise, widget.maxRaise));
-    });
-    _betSize3?.clicked?.addListener((_) {
-      debugPrint('3/4 Pot clicked');
-      widget.onSliderChanged?.call((widget.pot * 3 / 4).round().clamp(widget.minRaise, widget.maxRaise));
-    });
-    _betSize4?.clicked?.addListener((_) {
-      debugPrint('Min clicked');
-      widget.onSliderChanged?.call(widget.minRaise);
-    });
-
-    // Slider value listener - defer to avoid calling setState during build
-    _sliderValue?.addListener((value) {
-      if (!_isUpdatingState) {
-        final min = widget.minRaise;
-        final max = widget.maxRaise;
-        final newAmount = (min + (value / 100) * (max - min)).round();
-        // Use post-frame callback to avoid setState during build
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            widget.onSliderChanged?.call(newAmount);
-          }
-        });
+      try {
+        await CachedFonts.instance.addFont(font);
+      } catch (e) {
+        debugPrint('$_logTag: Could not load font $font: $e');
       }
-    });
+    }
   }
 
-  /// Handle button click with debounce protection
-  void _handleClick(String name, VoidCallback action) {
-    if (_isProcessingClick || !widget.isEnabled) {
-      debugPrint('$name click ignored (processing: $_isProcessingClick, enabled: ${widget.isEnabled})');
+  /// Called when enter state animation completes (like production)
+  void _handleEnterState() {
+    debugPrint('$_logTag: _handleEnterState CALLED');
+    _isEntering = false;
+    _isClosed = false;
+    _isLoading = false;
+    _safeSetState();
+  }
+
+  /// Called when exit state animation completes (like production)
+  void _handleExitState() {
+    debugPrint('$_logTag: _handleExitState CALLED');
+    if (_isLoading && !_isClosed) {
+      _isLoading = false;
+      _safeSetState();
       return;
     }
-    
-    _isProcessingClick = true;
-    debugPrint('$name clicked');
-    
-    // Execute the action
-    action();
-    
-    // Reset after a short delay to prevent rapid double-clicks
-    Future.delayed(const Duration(milliseconds: 500), () {
+    _isLoading = false;
+    _isClosed = true;
+    _isEntering = false;  // Reset for next show
+    _handleButtonsVisibility(availableActions: {});
+    _safeSetState();
+  }
+
+  void _safeSetState() {
+    SchedulerBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _isProcessingClick = false;
+        setState(() {});
       }
     });
   }
 
-  _RiveButton? _bindButton(String name) {
-    try {
-      final buttonVmi = _vmi?.viewModel(name);
-      if (buttonVmi != null) {
-        debugPrint('RiveActionButtons: Bound button: $name');
-        return _RiveButton(
-          enabled: buttonVmi.boolean('Enabled'),
-          visible: buttonVmi.boolean('Visible'),
-          selected: buttonVmi.boolean('Selected'),
-          clicked: buttonVmi.trigger('Clicked'),
-          label: buttonVmi.string('Label'),
-          value: buttonVmi.string('Value'),
-        );
-      }
-    } catch (e) {
-      debugPrint('RiveActionButtons: Could not bind $name: $e');
-    }
-    return null;
-  }
-
-  TriggerInput? _enterStateTrigger;
-  
-  void _setupStateMachine() {
-    final sm = _controller?.stateMachine;
-    if (sm == null) return;
-
-    for (final input in sm.inputs) {
-      debugPrint('RiveActionButtons: SM Input: ${input.name} (${input.runtimeType})');
-      if (input.name == 'Enter' && input is TriggerInput) {
-        _enterTrigger = input;
-      }
-      if (input.name == 'Enter State' && input is TriggerInput) {
-        _enterStateTrigger = input;
-      }
-      if (input.name == 'Slider Visible' && input is BooleanInput) {
-        _sliderVisibleInput = input;
-      }
-    }
-  }
-
-  void _updateButtonStates() {
-    if (_vmi == null) return;
-    
-    _isUpdatingState = true;  // Prevent callbacks during update
-
-    final canCheck = widget.canCheck;
+  /// Set initial button texts AND visibility BEFORE controller is set
+  void _setInitialButtonTexts() {
+    // Determine what buttons should be visible based on game state
     final isEnabled = widget.isEnabled;
-    final callAmount = widget.callAmount;
-    final raiseAmount = widget.raiseAmount;
-    final pot = widget.pot;
+    final canCheck = widget.canCheck;
+    final showBetControls = isEnabled && widget.minRaise != widget.maxRaise;
     
-    // Debug: log button state
-    debugPrint('');
-    debugPrint('=== UPDATE BUTTON STATES ===');
-    debugPrint('canCheck=$canCheck, isEnabled=$isEnabled, callAmount=$callAmount, pot=$pot');
-
-    // FOLD - always visible (title case like production)
-    _foldButton?.visible?.value = true;
-    _foldButton?.enabled?.value = isEnabled;
-    _foldButton?.label?.value = 'Fold';
-
-    // === MOBILE LAYOUT (matches production) ===
-    // In mobile: RAISE button is used for BOTH BET and RAISE
-    // CHECK and CALL are separate buttons
+    // Set button labels
+    _foldButton.label.value = 'Fold';
+    _checkButton.label.value = 'Check';
+    _callButton.label.value = 'Call';
+    _callButton.value?.value = '\$${widget.callAmount}';
     
-    // CHECK - visible when canCheck (no bet to call)
-    if (_checkButton == null) {
-      debugPrint('WARNING: CHECK button not bound!');
+    // RAISE or BET based on canCheck
+    if (canCheck) {
+      _raiseButton.label.value = 'Bet';
     } else {
-      if (_checkButton!.visible == null) {
-        debugPrint('WARNING: CHECK visible property is NULL!');
-      } else {
-        _checkButton!.visible!.value = canCheck;
-      }
-      _checkButton!.enabled?.value = isEnabled && canCheck;
-      _checkButton!.label?.value = 'Check';
-      debugPrint('CHECK: setVisible=$canCheck, actualVisible=${_checkButton!.visible?.value}');
+      _raiseButton.label.value = 'Raise to';
     }
-
-    // CALL - visible when !canCheck (there's a bet to call)
-    if (_callButton == null) {
-      debugPrint('WARNING: CALL button not bound!');
-    } else {
-      if (_callButton!.visible == null) {
-        debugPrint('WARNING: CALL visible property is NULL!');
-      } else {
-        _callButton!.visible!.value = !canCheck;
-      }
-      _callButton!.enabled?.value = isEnabled && !canCheck;
-      _callButton!.label?.value = 'Call';
-      _callButton!.value?.value = '\$$callAmount';
-      debugPrint('CALL: setVisible=${!canCheck}, actualVisible=${_callButton!.visible?.value}, value=\$$callAmount');
-    }
-
-    // RAISE - visible for BOTH BET and RAISE in mobile (always visible when enabled)
-    _raiseButton?.visible?.value = true;  // Always visible in mobile
-    _raiseButton?.enabled?.value = isEnabled;
-    // Label: "Bet" or "Raise to" (matches production style)
-    _raiseButton?.label?.value = canCheck ? 'Bet' : 'Raise to';
-    _raiseButton?.value?.value = '\$$raiseAmount';
-    debugPrint('Raise button: ${canCheck ? "Bet" : "Raise to"} \$$raiseAmount');
-
-    // BET - HIDDEN on mobile (RAISE button handles both)
-    _betButton?.visible?.value = false;
-
-    // ALL-IN - hidden (not used in production mobile layout)
-    _allInButton?.visible?.value = false;
-
-    // Bet shortcuts (matches production style - title case)
-    final showBetControls = isEnabled;
-    final halfPot = (pot / 2).round().clamp(widget.minRaise, widget.maxRaise);
-    final threeFourthPot = (pot * 3 / 4).round().clamp(widget.minRaise, widget.maxRaise);
-
-    // Slot 1: All-in (top right)
-    _betSize1?.visible?.value = showBetControls;
-    _betSize1?.enabled?.value = isEnabled;
-    _betSize1?.label?.value = 'All-in';
-    _betSize1?.value?.value = '\$${widget.maxRaise}';
-
-    // Slot 2: Pot
-    _betSize2?.visible?.value = showBetControls;
-    _betSize2?.enabled?.value = isEnabled;
-    _betSize2?.label?.value = 'Pot';
-    _betSize2?.value?.value = '\$$pot';
-
-    // Slot 3: 3/4 Pot
-    _betSize3?.visible?.value = showBetControls;
-    _betSize3?.enabled?.value = isEnabled;
-    _betSize3?.label?.value = '3/4';
-    _betSize3?.value?.value = '\$$threeFourthPot';
-
-    // Slot 4: Min (bottom right)
-    _betSize4?.visible?.value = showBetControls;
-    _betSize4?.enabled?.value = isEnabled;
-    _betSize4?.label?.value = 'Min';
-    _betSize4?.value?.value = '\$${widget.minRaise}';
-
-    // Slider
-    _sliderVisibleInput?.value = showBetControls;
-    _updateSliderPosition();
+    _raiseButton.value?.value = '\$${widget.raiseAmount}';
     
-    // Bet size input value (the "$value" text in the middle)
-    _betSizeInputValue?.value = '\$$raiseAmount';
+    // SET VISIBILITY IMMEDIATELY (like production)
+    // FOLD - only when enabled
+    _foldButton.visible.value = isEnabled;
+    
+    // CHECK - only when enabled AND canCheck
+    _checkButton.visible.value = isEnabled && canCheck;
+    
+    // CALL - only when enabled AND !canCheck  
+    _callButton.visible.value = isEnabled && !canCheck;
+    
+    // RAISE - only when enabled (handles both BET and RAISE on mobile)
+    _raiseButton.visible.value = isEnabled;
+    
+    // BET button hidden on mobile
+    _betButton.visible.value = false;
+    
+    // Shortcuts - only when bet controls should show
+    if (_shortcutButtons.isNotEmpty) {
+      _shortcutButtons[0].label.value = 'All-in';
+      _shortcutButtons[0].value?.value = '\$${widget.maxRaise}';
+      _shortcutButtons[0].visible.value = showBetControls;
+      
+      _shortcutButtons[1].label.value = 'Pot';
+      _shortcutButtons[1].value?.value = '\$${widget.pot}';
+      _shortcutButtons[1].visible.value = showBetControls;
+      
+      _shortcutButtons[2].label.value = '3/4';
+      _shortcutButtons[2].value?.value = '\$${(widget.pot * 3 / 4).round()}';
+      _shortcutButtons[2].visible.value = showBetControls;
+      
+      _shortcutButtons[3].label.value = 'Min';
+      _shortcutButtons[3].value?.value = '\$${widget.minRaise}';
+      _shortcutButtons[3].visible.value = showBetControls;
+    }
+    
+    // Slider visibility
+    _sliderVisible?.value = showBetControls;
+    _betSizeInputVisible?.value = showBetControls;
+    
+    // Bet size input
+    _knobInputValue?.value = '\$${widget.raiseAmount}';
+    
+    debugPrint('$_logTag: Initial state - isEnabled=$isEnabled, canCheck=$canCheck');
+    debugPrint('$_logTag: Initial visibility - FOLD=$isEnabled, CHECK=${isEnabled && canCheck}, CALL=${isEnabled && !canCheck}, RAISE=$isEnabled');
+  }
 
-    // Advance to apply changes
+  /// Show Rive buttons with animation (like production)
+  void _showRiveButtons() {
+    debugPrint('$_logTag: _showRiveButtons called, _isEntering=$_isEntering');
+    // Always fire the trigger (reset _isEntering check)
+    _isEntering = true;
+    _enterStateTrigger?.fire();
+    debugPrint('$_logTag: Enter State trigger fired');
+  }
+
+  /// Hide Rive buttons with animation (like production)
+  void _hideRiveButtons() {
+    _isEntering = false;  // Reset so we can show again
+    _exitStateTrigger?.fire();
+    debugPrint('$_logTag: Exit State trigger fired');
+  }
+
+  /// Set button visibility based on available actions (EXACTLY like production lines 475-505)
+  void _handleButtonsVisibility({Set<String>? availableActions}) {
+    if (_controller == null || _isLoading) return;
+
+    // Determine available actions from widget state
+    final actions = availableActions ?? _getAvailableActions();
+    final showBetControls = (actions.contains('BET') || actions.contains('RAISE')) &&
+        widget.minRaise != widget.maxRaise;
+
+    final callShouldShow = actions.contains('CALL');
+    final checkShouldShow = actions.contains('CHECK');
+    final foldShouldShow = actions.contains('FOLD');
+    final raiseShouldShow = actions.contains('RAISE') || actions.contains('BET');
+    
+    // First pass - set visibility
+    _foldButton.visible.value = foldShouldShow;
+    _checkButton.visible.value = checkShouldShow;
+    _callButton.visible.value = callShouldShow;
+    _raiseButton.visible.value = raiseShouldShow;
+    _betButton.visible.value = false;
+
+    // Force Rive to process
     _controller?.advance(0);
     
-    _isUpdatingState = false;  // Re-enable callbacks
+    // Second pass - set visibility AGAIN after advance (fixes CALL/CHECK binding issue)
+    _foldButton.visible.value = foldShouldShow;
+    _checkButton.visible.value = checkShouldShow;
+    _callButton.visible.value = callShouldShow;
+    _raiseButton.visible.value = raiseShouldShow;
+
+    // Shortcut buttons visibility
+    for (int i = 0; i < _shortcutButtons.length; i++) {
+      _shortcutButtons[i].visible.value = showBetControls;
+      _shortcutButtons[i].enabled.value = showBetControls;
+    }
+
+    // Slider visibility
+    _sliderVisible?.value = showBetControls;
+    _betSizeInputVisible?.value = showBetControls;
+
+    debugPrint('$_logTag: Visibility - FOLD=$foldShouldShow, CHECK=$checkShouldShow, CALL=$callShouldShow, RAISE=$raiseShouldShow');
   }
 
-  void _updateSliderPosition() {
+  /// Get available actions based on widget state
+  Set<String> _getAvailableActions() {
+    debugPrint('$_logTag: _getAvailableActions - isEnabled=${widget.isEnabled}, canCheck=${widget.canCheck}');
+    if (!widget.isEnabled) return {};
+    
+    final actions = <String>{'FOLD'};
+    
+    if (widget.canCheck) {
+      actions.add('CHECK');
+      actions.add('BET');
+    } else {
+      actions.add('CALL');
+      actions.add('RAISE');
+    }
+    
+    debugPrint('$_logTag: Available actions: $actions');
+    return actions;
+  }
+
+  /// Set button texts (like production lines 432-458)
+  void _handleButtonsTexts() {
+    if (_controller == null || _isLoading) return;
+
+    _foldButton.label.value = 'Fold';
+    _checkButton.label.value = 'Check';
+
+    if (_getAvailableActions().contains('CALL')) {
+      _callButton.label.value = 'Call';
+      _callButton.value?.value = '\$${widget.callAmount}';
+    }
+
+    // RAISE or BET text (like production lines 460-472)
+    if (_getAvailableActions().contains('RAISE')) {
+      _raiseButton.label.value = 'Raise to';
+      _raiseButton.value?.value = '\$$_currentBet';
+    } else if (_getAvailableActions().contains('BET')) {
+      _raiseButton.label.value = 'Bet';
+      _raiseButton.value?.value = '\$$_currentBet';
+    }
+
+    // Shortcut labels
+    if (_shortcutButtons.isNotEmpty) {
+      _shortcutButtons[0].label.value = 'All-in';
+      _shortcutButtons[0].value?.value = '\$${widget.maxRaise}';
+      _shortcutButtons[1].label.value = 'Pot';
+      _shortcutButtons[1].value?.value = '\$${widget.pot}';
+      _shortcutButtons[2].label.value = '3/4';
+      _shortcutButtons[2].value?.value = '\$${(widget.pot * 3 / 4).round()}';
+      _shortcutButtons[3].label.value = 'Min';
+      _shortcutButtons[3].value?.value = '\$${widget.minRaise}';
+    }
+
+    // Update bet size input
+    _knobInputValue?.value = '\$$_currentBet';
+
+    debugPrint('$_logTag: Texts updated');
+  }
+
+  void _setSliderState() {
     final min = widget.minRaise;
     final max = widget.maxRaise;
     if (max > min) {
-      final normalizedPos = ((widget.raiseAmount - min) / (max - min) * 100).clamp(0, 100);
+      final normalizedPos = ((_currentBet - min) / (max - min) * 100).clamp(0, 100);
       _sliderValue?.value = normalizedPos.toDouble();
     }
   }
@@ -440,11 +496,49 @@ class _RiveActionButtonsState extends State<RiveActionButtons> {
   @override
   void didUpdateWidget(RiveActionButtons oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _updateButtonStates();
+
+    if (_controller == null) return;
+
+    // Update current bet if needed
+    if (widget.raiseAmount != oldWidget.raiseAmount) {
+      _currentBet = widget.raiseAmount;
+    }
+
+    debugPrint('$_logTag: didUpdateWidget - isEnabled: ${oldWidget.isEnabled} -> ${widget.isEnabled}, _isClosed=$_isClosed');
+    
+    // Show or hide buttons based on isEnabled FIRST
+    if (widget.isEnabled && !oldWidget.isEnabled) {
+      debugPrint('$_logTag: Transitioning to ENABLED - calling _showRiveButtons');
+      _isClosed = false;
+      _showRiveButtons();
+    } else if (!widget.isEnabled && oldWidget.isEnabled) {
+      debugPrint('$_logTag: Transitioning to DISABLED - calling _hideRiveButtons');
+      _hideRiveButtons();
+    }
+
+    // Update visibility and texts AFTER show/hide trigger (fixes visibility reset issue)
+    _handleButtonsTexts();
+    _handleButtonsVisibility();
+    _setSliderState();
+    
+    // Force rebuild to apply visibility changes
+    setState(() {});
   }
 
   @override
   void dispose() {
+    // Only dispose buttons if controller was initialized (like production)
+    if (_controller != null) {
+      _callButton.dispose();
+      _checkButton.dispose();
+      _foldButton.dispose();
+      _raiseButton.dispose();
+      _betButton.dispose();
+      for (final shortcut in _shortcutButtons) {
+        shortcut.dispose();
+      }
+    }
+    disposeRiveObjects();
     _controller?.dispose();
     super.dispose();
   }
@@ -452,200 +546,40 @@ class _RiveActionButtonsState extends State<RiveActionButtons> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return _buildLoading();
+      return const SizedBox(
+        height: 250,
+        child: Center(child: CircularProgressIndicator()),
+      );
     }
 
-    if (_errorMessage != null || _controller == null) {
-      return _buildError();
+    if (_errorMessage != null) {
+      return SizedBox(
+        height: 250,
+        child: Center(
+          child: Text('Error: $_errorMessage', style: const TextStyle(color: Colors.red)),
+        ),
+      );
     }
 
-    // Artboard is 375x250
+    if (_controller == null) {
+      return const SizedBox(height: 250);
+    }
+
+    // Calculate size based on artboard (like production)
     final screenWidth = MediaQuery.of(context).size.width;
-    final artboardWidth = _controller!.artboard.width;  // 375
-    final artboardHeight = _controller!.artboard.height; // 250
-    
-    // Scale to fill width, calculate proportional height
-    final scale = screenWidth / artboardWidth;
-    final scaledHeight = artboardHeight * scale;
-    
-    // Transparent container - buttons float over the table
+    final artboardWidth = _controller!.artboard.width;
+    final artboardHeight = _controller!.artboard.height;
+    final aspectRatio = artboardWidth / artboardHeight;
+    final scaledHeight = screenWidth / aspectRatio;
+
     return SizedBox(
       width: screenWidth,
       height: scaledHeight,
-      child: Stack(
-        children: [
-          // Rive animation with transparent background
-          RiveWidget(
-            controller: _controller!,
-            fit: Fit.contain,
-            alignment: Alignment.center,
-            hitTestBehavior: RiveHitTestBehavior.translucent,
-          ),
-          
-          // Overlay controls for bet size (positioned based on artboard layout)
-          if (widget.isEnabled) ...[
-            // Up arrow tap area (increase bet)
-            Positioned(
-              left: screenWidth * 0.38,  // Approximate position
-              top: scaledHeight * 0.08,
-              width: screenWidth * 0.22,
-              height: scaledHeight * 0.25,
-              child: GestureDetector(
-                onTap: _incrementBet,
-                behavior: HitTestBehavior.translucent,
-                child: Container(color: Colors.transparent),
-              ),
-            ),
-            // Down arrow tap area (decrease bet)
-            Positioned(
-              left: screenWidth * 0.38,
-              top: scaledHeight * 0.45,
-              width: screenWidth * 0.22,
-              height: scaledHeight * 0.25,
-              child: GestureDetector(
-                onTap: _decrementBet,
-                behavior: HitTestBehavior.translucent,
-                child: Container(color: Colors.transparent),
-              ),
-            ),
-            // Numpad button tap area
-            Positioned(
-              left: screenWidth * 0.60,
-              top: scaledHeight * 0.15,
-              width: screenWidth * 0.12,
-              height: scaledHeight * 0.40,
-              child: GestureDetector(
-                onTap: _showNumpadDialog,
-                behavior: HitTestBehavior.translucent,
-                child: Container(color: Colors.transparent),
-              ),
-            ),
-          ],
-        ],
+      child: RiveWidget(
+        controller: _controller!,
+        hitTestBehavior: RiveHitTestBehavior.translucent,
+        fit: Fit.fitWidth,
       ),
     );
   }
-  
-  void _incrementBet() {
-    final step = widget.pot > 100 ? 20 : 10; // Increment by BB or 10
-    final newAmount = (widget.raiseAmount + step).clamp(widget.minRaise, widget.maxRaise);
-    widget.onSliderChanged?.call(newAmount);
-    debugPrint('Bet increased to \$$newAmount');
-  }
-  
-  void _decrementBet() {
-    final step = widget.pot > 100 ? 20 : 10;
-    final newAmount = (widget.raiseAmount - step).clamp(widget.minRaise, widget.maxRaise);
-    widget.onSliderChanged?.call(newAmount);
-    debugPrint('Bet decreased to \$$newAmount');
-  }
-  
-  void _showNumpadDialog() {
-    final controller = TextEditingController(text: widget.raiseAmount.toString());
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text(
-          'Enter Bet Amount',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          autofocus: true,
-          style: const TextStyle(color: Colors.white, fontSize: 24),
-          decoration: InputDecoration(
-            prefixText: '\$ ',
-            prefixStyle: const TextStyle(color: Colors.amber, fontSize: 24),
-            hintText: '${widget.minRaise} - ${widget.maxRaise}',
-            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
-            enabledBorder: const UnderlineInputBorder(
-              borderSide: BorderSide(color: Colors.amber),
-            ),
-            focusedBorder: const UnderlineInputBorder(
-              borderSide: BorderSide(color: Colors.amber, width: 2),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('CANCEL', style: TextStyle(color: Colors.white54)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
-            onPressed: () {
-              final value = int.tryParse(controller.text) ?? widget.raiseAmount;
-              final clampedValue = value.clamp(widget.minRaise, widget.maxRaise);
-              widget.onSliderChanged?.call(clampedValue);
-              Navigator.pop(context);
-              debugPrint('Bet set to \$$clampedValue');
-            },
-            child: const Text('OK', style: TextStyle(color: Colors.black)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLoading() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    return SizedBox(
-      width: screenWidth,
-      height: 180,
-      child: const Center(
-        child: CircularProgressIndicator(color: Colors.amber),
-      ),
-    );
-  }
-
-  Widget _buildError() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    return SizedBox(
-      width: screenWidth,
-      height: 180,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, color: Colors.red, size: 32),
-            const SizedBox(height: 8),
-            Text(
-              'Rive load failed',
-              style: TextStyle(color: Colors.red.shade300, fontSize: 12),
-            ),
-            if (_errorMessage != null)
-              Text(
-                _errorMessage!,
-                style: const TextStyle(color: Colors.white54, fontSize: 10),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Helper class for Rive button bindings
-class _RiveButton {
-  final ViewModelInstanceBoolean? enabled;
-  final ViewModelInstanceBoolean? visible;
-  final ViewModelInstanceBoolean? selected;
-  final ViewModelInstanceTrigger? clicked;
-  final ViewModelInstanceString? label;
-  final ViewModelInstanceString? value;
-
-  _RiveButton({
-    this.enabled,
-    this.visible,
-    this.selected,
-    this.clicked,
-    this.label,
-    this.value,
-  });
 }
