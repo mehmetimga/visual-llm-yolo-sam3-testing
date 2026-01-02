@@ -1,39 +1,110 @@
 # Rive Button YOLO Test Results
 
 **Test Date:** January 1, 2026
-**Test Script:** `scripts/test_rive_yolo_mapping.ts`
-**Status:** ✅ PASSED
+**Status:** iOS ✅ PASSED | Android ✅ PASSED
 
 ---
 
-## Summary
+## Overview
 
-| Metric | Value |
-|--------|-------|
-| Rounds completed | 5/5 |
-| Screenshots captured | 42 |
-| Test duration | ~3 minutes |
+This document describes automated testing of Rive button clicking using YOLO detection in a Flutter poker game app. YOLO detects button types (CALL, RAISE, FOLD, etc.), which are then mapped to calibrated clickable coordinates.
+
+### Key Insight
+
+YOLO visual coordinates don't match clickable positions. The solution is to use YOLO for button **type detection only**, then map to pre-calibrated tap coordinates.
+
+---
+
+## Prerequisites
+
+### Common Requirements
+
+- YOLO detector running on `http://localhost:8001`
+- Appium server running on `http://127.0.0.1:4723`
+- Demo casino app installed on device/simulator
+
+### iOS
+
+```bash
+# Start iOS Simulator
+open -a Simulator
+
+# Start Appium
+appium
+
+# Run test
+npx tsx scripts/test_rive_yolo_mapping.ts --rounds=5 --actions=5
+```
+
+### Android
+
+```bash
+# Start Android Emulator
+emulator -avd <avd_name>
+
+# Start Appium with ADB shell enabled (required for Android)
+ANDROID_HOME=~/Library/Android/sdk \
+ANDROID_SDK_ROOT=~/Library/Android/sdk \
+appium --allow-insecure=uiautomator2:adb_shell
+
+# Run test
+npx tsx scripts/test_rive_yolo_mapping_android.ts --rounds=3 --actions=5
+```
 
 ---
 
 ## Test Flow
 
-1. **Casino Lobby → Poker Table**: Click "PLAY POKER" button (Flutter)
-2. **Start Game**: Click DEAL button (Flutter button via label selector)
-3. **Play Poker**: Use YOLO detection to identify buttons, map to clickable coordinates, tap
-4. **Return to Lobby**: Click back button (coordinate tap)
-5. **Repeat**: 5 rounds total
+1. **Casino Lobby → Poker Table**: Click "PLAY POKER" button
+2. **Start Game**: Click DEAL button
+3. **Play Poker**: YOLO detects buttons → map to clickable coords → tap
+4. **Wait for Game End**: Detect "DEAL AGAIN" button
+5. **Return to Lobby**: Tap back button
+6. **Repeat**: For specified number of rounds
 
 ---
 
-## Key Finding: YOLO → Clickable Mapping
+## iOS vs Android: Key Differences
 
-The YOLO → Clickable mapping approach works reliably:
+| Aspect | iOS | Android |
+|--------|-----|---------|
+| **Tap Method** | Appium pointer actions | ADB `input tap` via `mobile: shell` |
+| **Coordinate System** | Points (1x scale) | Pixels / 3 (density 480 dpi) |
+| **Screen Size** | 440 x 956 | 448 x 997 |
+| **Flutter Selector** | `@label` | `@content-desc` |
+| **Appium Config** | Standard | Requires `--allow-insecure=uiautomator2:adb_shell` |
+| **Y-Offset** | ~161-213 px | ~370 px |
 
-- **YOLO detects** button TYPE (CALL, RAISE, FOLD)
-- **We map** to fixed clickable positions
+### iOS Tap Implementation
 
-### Clickable Position Map
+```typescript
+await driver.action('pointer')
+  .move({ x, y })
+  .down()
+  .pause(100)  // 100ms pause is CRUCIAL for Rive
+  .up()
+  .perform();
+```
+
+### Android Tap Implementation
+
+```typescript
+// Appium pointer actions don't work on Android Flutter/Rive
+// Must use ADB input tap
+const pixelX = Math.round(x * 3.0);
+const pixelY = Math.round(y * 3.0);
+
+await driver.execute('mobile: shell', {
+  command: 'input',
+  args: ['tap', pixelX.toString(), pixelY.toString()],
+});
+```
+
+---
+
+## Calibrated Clickable Positions
+
+### iOS
 
 ```typescript
 const CLICKABLE_POSITIONS = {
@@ -41,144 +112,112 @@ const CLICKABLE_POSITIONS = {
   CALL:  { x: 60, y: 680 },
   RAISE: { x: 190, y: 680 },
   FOLD:  { x: 60, y: 780 },
-  DEAL:  { x: 220, y: 550 },
   BACK:  { x: 32, y: 90 },
 };
 ```
 
-### Sample Output
+### Android
 
-```
-🎯 YOLO detected: RAISE(98%) YOLO:(220,893)→Click:(190,680), CALL(97%) YOLO:(58,841)→Click:(60,680), FOLD(94%) YOLO:(360,894)→Click:(60,780)
-✨ Action: CALL → tapping at (60, 680)
-👆 Tapped CALL at (60, 680)
+```typescript
+const CLICKABLE_POSITIONS = {
+  CHECK: { x: 57, y: 767 },
+  CALL:  { x: 57, y: 767 },
+  BET:   { x: 167, y: 767 },
+  RAISE: { x: 167, y: 767 },
+  FOLD:  { x: 57, y: 817 },
+  BACK:  { x: 33, y: 67 },
+};
 ```
 
 ---
 
-## Why Direct YOLO Coordinates Don't Work
+## Test Results
 
-### The Problem
+### iOS Results
 
-YOLO coordinates don't match clickable positions because Rive renders buttons at different locations than where they respond to taps.
+| Metric | Value |
+|--------|-------|
+| Rounds completed | 5/5 |
+| Screenshots captured | 42 |
+| Test duration | ~3 minutes |
 
-| Button | YOLO Visual Position | Clickable Position | Difference |
-|--------|---------------------|-------------------|------------|
-| CALL   | (58, 841)           | (60, 680)         | Y: -161px  |
-| RAISE  | (219, 893)          | (190, 680)        | Y: -213px  |
-| FOLD   | (360, 894)          | (60, 780)         | X: -300px! |
+### Android Results
 
-### Layout Mismatch
+| Metric | Value |
+|--------|-------|
+| Rounds completed | 5/5 |
+| YOLO detections | 89 |
+| Taps executed | 30 |
 
+---
+
+## YOLO Detection
+
+### Visual Positions Detected
+
+**iOS:**
 ```
-Visual layout (YOLO sees):     CALL(left) | RAISE(center) | FOLD(right)
-Clickable layout (tap works):  CALL/FOLD(left, stacked) | RAISE(center)
+CALL:  (58, 841)  - 97% confidence
+RAISE: (219, 893) - 98% confidence
+FOLD:  (360, 894) - 94% confidence
 ```
+
+**Android:**
+```
+CALL:  (58, 890)  - 96% confidence
+RAISE: (224, 936) - 92-94% confidence
+FOLD:  (368, 944) - 95% confidence
+```
+
+### Why YOLO Coordinates Don't Work Directly
+
+Rive renders buttons visually at different locations than where they respond to taps:
+
+| Button | YOLO Visual | Clickable | Offset |
+|--------|------------|-----------|--------|
+| CALL   | (58, 841)  | (60, 680) | Y: -161px |
+| FOLD   | (360, 894) | (60, 780) | X: -300px! |
 
 The FOLD button is visually on the RIGHT but clickable on the LEFT.
 
 ---
 
-## Solution Architecture
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    YOLO Detection                           │
-│  Detects: btn_call, btn_raise, btn_fold                     │
-│  Returns: Visual coordinates (NOT usable for tapping)       │
-└─────────────────────┬───────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│            YOLO Detection                    │
+│  Detects: btn_call, btn_raise, btn_fold     │
+│  Returns: Button TYPE (not coordinates)      │
+└─────────────────────┬───────────────────────┘
                       │
                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Button Type Mapping                            │
-│  Input:  "btn_call" → Output: { x: 60, y: 680 }            │
-│  Input:  "btn_fold" → Output: { x: 60, y: 780 }            │
-│  Input:  "btn_raise" → Output: { x: 190, y: 680 }          │
-└─────────────────────┬───────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│          Button Type → Position Map          │
+│  "btn_call"  → { x: 60, y: 680 }  (iOS)     │
+│  "btn_call"  → { x: 57, y: 767 }  (Android) │
+└─────────────────────┬───────────────────────┘
                       │
                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Coordinate Tap                                 │
-│  driver.action('pointer')                                   │
-│    .move({ x, y })                                          │
-│    .down()                                                  │
-│    .pause(100)  // CRUCIAL for Rive                         │
-│    .up()                                                    │
-│    .perform()                                               │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Critical Implementation Details
-
-### 1. Rive Button Tap Pattern
-
-Standard Appium clicks don't work on Rive buttons. Must use:
-
-```typescript
-await driver.action('pointer')
-  .move({ x, y })
-  .down()
-  .pause(100)  // 100ms pause is CRUCIAL
-  .up()
-  .perform();
-```
-
-### 2. Screenshot Before Tap
-
-Taking a screenshot before tapping helps with Rive timing:
-
-```typescript
-await driver.takeScreenshot();  // Helps sync Rive state
-await tapRiveButton(driver, x, y, name);
-```
-
-### 3. DEAL Button
-
-Use Flutter label selector for DEAL button (more reliable):
-
-```typescript
-const dealSelectors = [
-  '//*[@label="DEAL"]',
-  '//*[contains(@label, "DEAL")]',
-];
+┌─────────────────────────────────────────────┐
+│           Platform-Specific Tap              │
+│  iOS: Appium pointer actions                 │
+│  Android: ADB input tap                      │
+└─────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `scripts/test_rive_yolo_mapping.ts` | Test script with YOLO mapping |
-| `scripts/test_rive_e2e.ts` | Original E2E test (working) |
-| `scripts/lib/yoloToClickable.ts` | Coordinate mapping utilities |
-| `services/detector/fastLabel_rive.py` | Updated with clickable positions |
-| `docs/YOLO_COORDINATE_ANALYSIS.md` | Root cause analysis |
+| File | Description |
+|------|-------------|
+| `scripts/test_rive_yolo_mapping.ts` | iOS test script |
+| `scripts/test_rive_yolo_mapping_android.ts` | Android test script |
 
 ---
 
-## Future: Make YOLO Coordinates Directly Usable
+## Output Locations
 
-To make YOLO coordinates match clickable positions:
-
-1. **Already Done**: Updated `fastLabel_rive.py` with correct clickable positions
-2. **Next Step**: Regenerate training labels with new positions
-3. **Final Step**: Retrain YOLO model
-
-After retraining, YOLO coordinates will directly match tap targets.
-
----
-
-## Test Output Location
-
-Screenshots saved to:
-```
-apps/orchestrator/out/rive_yolo_mapping_test/
-```
-
-Files include:
-- `round_N_table_*.png` - Poker table state
-- `before_CALL_*.png` - Screenshots before CALL taps
-- `round_N_complete_*.png` - Round completion confirmation
+- **iOS:** `apps/orchestrator/out/rive_yolo_mapping_test/`
+- **Android:** `apps/orchestrator/out/rive_yolo_android/`
