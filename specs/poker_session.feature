@@ -19,97 +19,10 @@ Feature: Poker Session - Play 5 Complete Hands
     When I tap "poker_table_play_button"
     Then I should see text "DEAL"
 
-    # === START GAME - DEAL FIRST HAND ===
-    When I tap "deal_button"
-    And I wait 2 seconds
-
-    # === HAND 1: Play through all betting rounds ===
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 5 seconds
-    # Hand ends - wait for DEAL AGAIN to appear, then click it
-    When I wait for "DEAL AGAIN" to appear
-    When I tap "deal_again"
-    And I wait 2 seconds
-
-    # === HAND 2: Play through all betting rounds ===
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 5 seconds
-    # Hand ends - wait for DEAL AGAIN to appear, then click it
-    When I wait for "DEAL AGAIN" to appear
-    When I tap "deal_again"
-    And I wait 2 seconds
-
-    # === HAND 3: Play through all betting rounds ===
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 5 seconds
-    # Hand ends - wait for DEAL AGAIN to appear, then click it
-    When I wait for "DEAL AGAIN" to appear
-    When I tap "deal_again"
-    And I wait 2 seconds
-
-    # === HAND 4: Play through all betting rounds ===
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 5 seconds
-    # Hand ends - wait for DEAL AGAIN to appear, then click it
-    When I wait for "DEAL AGAIN" to appear
-    When I tap "deal_again"
-    And I wait 2 seconds
-
-    # === HAND 5: Play through all betting rounds ===
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 2 seconds
-    When I tap "call_button"
-    And I wait 5 seconds
-    # Hand 5 ends - wait for DEAL AGAIN to appear (confirms hand ended), then go back
-    When I wait for "DEAL AGAIN" to appear
+    # === PLAY HANDS (state-agnostic) ===
+    # This uses YOLO detections + the proven 100ms press pattern to click Rive buttons.
+    # It DOES NOT assume "DEAL AGAIN" is present; it will only click DEAL/DEAL AGAIN when visible.
+    When AI plays 5 poker hands
 
     # === RETURN TO LOBBY ===
     When I tap "back_button"

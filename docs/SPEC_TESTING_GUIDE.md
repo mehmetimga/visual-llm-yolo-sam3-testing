@@ -7,13 +7,13 @@ This guide explains how to run BDD spec tests on iOS and Android devices using t
 ### Run on iOS (default)
 ```bash
 cd apps/orchestrator
-pnpm run dev --spec ../../specs/poker_session.feature --platform flutter --real
+pnpm run dev --spec specs/poker_session.feature --platform flutter --real
 ```
 
 ### Run on Android
 ```bash
 cd apps/orchestrator
-pnpm run dev --spec ../../specs/poker_session.feature --platform flutter --device android --real
+pnpm run dev --spec specs/poker_session.feature --platform flutter --device android --real
 ```
 
 ## Prerequisites

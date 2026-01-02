@@ -106,7 +106,7 @@ async function detectButtonsFromScreenshotBase64(base64Png: string): Promise<Rec
     return {};
   }
 
-  const json = await res.json();
+  const json = (await res.json()) as { detections?: YOLODet[] };
   const detections: YOLODet[] = json.detections || [];
 
   const positions: Record<string, { x: number; y: number }> = {};

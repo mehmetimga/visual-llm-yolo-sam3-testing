@@ -4,6 +4,7 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
+import { visionFallback } from './visionHelper.js';
 
 export interface PokerGameState {
   playerCards: string[];
@@ -93,6 +94,23 @@ async function detectPokerElements(
     console.log(`   ⚠️ YOLO detection failed: ${err}`);
     return [];
   }
+}
+
+type DetectedElement = {
+  type?: string;
+  text?: string;
+  confidence?: number;
+  bbox?: { x: number; y: number; w: number; h: number };
+};
+
+function hasRiveActionButtonsFromDetections(detections: DetectedElement[]): boolean {
+  return detections.some((d) => {
+    const t = (d.type || '').toLowerCase();
+    if (!t.startsWith('btn_')) return false;
+    const conf = d.confidence ?? 0;
+    // Keep this permissive; our model is high-confidence on Rive buttons.
+    return conf >= 0.3;
+  });
 }
 
 /**
@@ -291,17 +309,17 @@ function getRandomDecision(): PokerDecision {
  * Map AI decision to actual button tap coordinates
  */
 export function getActionButtonPosition(action: PokerDecision['action']): { x: number; y: number } {
-  // Button positions for iPhone 16 Pro Max (430x932 viewport)
-  // Buttons are at the bottom row
-  const buttonPositions: Record<string, { x: number; y: number }> = {
-    fold: { x: 55, y: 905 },
-    check: { x: 160, y: 905 },
-    call: { x: 160, y: 905 },  // Same position as check
-    raise: { x: 265, y: 905 },
-    all_in: { x: 370, y: 905 },
+  // Calibrated clickable positions for iOS Rive canvas (logical coordinates)
+  // IMPORTANT: Visual locations differ from clickable ones for Rive.
+  const rive: Record<string, { x: number; y: number }> = {
+    fold: { x: 60, y: 780 },
+    check: { x: 60, y: 680 },
+    call: { x: 60, y: 680 },
+    raise: { x: 190, y: 680 },
+    all_in: { x: 380, y: 680 },
   };
 
-  return buttonPositions[action] || buttonPositions.check;
+  return rive[action] || rive.check;
 }
 
 /**
@@ -340,6 +358,9 @@ export async function playPokerHand(
     const screenshotPath = `${stepsDir}/poker_hand_${handNumber}_round_${roundNumber}.png`;
     const screenshot = await driver.takeScreenshot();
     writeFileSync(screenshotPath, screenshot, 'base64');
+
+    // Detect elements once per loop (used for turn heuristics + logging)
+    const detections = await detectPokerElements(screenshotPath, config.detectorUrl);
     
     // Check if we see DEAL AGAIN button (hand is over)
     const handEnded = await isHandComplete(driver);
@@ -364,8 +385,9 @@ export async function playPokerHand(
     // Reset wait counter when it's our turn
     waitCycles = 0;
     
-    // Check if action buttons are visible AND enabled
-    const hasActionButtons = await hasPokerActionButtons(driver);
+    // IMPORTANT: Rive action buttons are NOT exposed as XCUIElementTypeButton.
+    // Use YOLO detections (btn_call/btn_raise/...) to decide whether actions are available.
+    const hasActionButtons = hasRiveActionButtonsFromDetections(detections);
     if (!hasActionButtons) {
       console.log(`   ⏳ No action buttons available, waiting...`);
       await driver.pause(300);  // Quick check
@@ -385,7 +407,7 @@ export async function playPokerHand(
     lastDecision = decision;
     
     // Execute the decision
-    await executePokerAction(driver, decision);
+    await executePokerAction(driver, decision, screenshotPath, config);
     
     // Brief wait for game to process
     await driver.pause(500);
@@ -520,49 +542,49 @@ async function clickDealButton(driver: WebdriverIO.Browser): Promise<boolean> {
  */
 async function executePokerAction(
   driver: WebdriverIO.Browser,
-  decision: PokerDecision
+  decision: PokerDecision,
+  screenshotPath: string,
+  config: AIPokerConfig
 ): Promise<{ success: boolean; decision: PokerDecision }> {
-  // CHECK and CALL are often the same button position
-  // If no bet to call, button shows "CHECK". If there's a bet, it shows "CALL $X"
-  const actionLabels: Record<string, string[]> = {
-    fold: ['FOLD', 'Fold'],
-    check: ['CHECK', 'Check', 'CALL', 'Call'],  // Try CHECK first, then CALL
-    call: ['CALL', 'Call', 'CHECK', 'Check'],   // Try CALL first, then CHECK (if no bet)
-    raise: ['RAISE', 'Raise'],
-    all_in: ['ALL IN', 'ALL-IN', 'All In', 'ALLIN'],
-  };
+  // Use vision helper (YOLO-first) so we can click Rive canvas reliably
+  // (it maps btn_* types to calibrated clickable positions).
+  const targetText =
+    decision.action === 'all_in' ? 'ALL IN' :
+    decision.action === 'raise' ? 'RAISE' :
+    decision.action === 'call' ? 'CALL' :
+    decision.action === 'fold' ? 'FOLD' :
+    'CHECK';
 
-  const labels = actionLabels[decision.action] || [decision.action.toUpperCase()];
-  let clicked = false;
+  const visionResult = await visionFallback(screenshotPath, targetText, {
+    detectorUrl: config.detectorUrl,
+    ollamaBaseUrl: config.ollamaBaseUrl,
+    ollamaModel: config.ollamaModel,
+  });
 
-  // Try to find and click the button by label
-  for (const label of labels) {
-    try {
-      const button = await driver.$(`//XCUIElementTypeButton[contains(@label, "${label}") or contains(@name, "${label}")]`);
-      if (await button.isExisting()) {
-        await button.click();
-        console.log(`   ✅ Clicked ${label} button`);
-        clicked = true;
-        break;
-      }
-    } catch {}
-  }
-
-  // Fallback to coordinate tap
-  if (!clicked) {
-    const pos = getActionButtonPosition(decision.action);
-    console.log(`   📍 Tapping ${decision.action.toUpperCase()} at (${pos.x}, ${pos.y})`);
+  if (visionResult.success && visionResult.clickPoint) {
+    const { x, y } = visionResult.clickPoint;
+    console.log(`   🎯 Tapping ${targetText} at (${x}, ${y}) via YOLO/VLM`);
     await driver.action('pointer')
-      .move({ x: pos.x, y: pos.y })
+      .move({ x, y })
       .down()
+      .pause(100) // crucial for Rive
       .up()
       .perform();
-    clicked = true;
+    await driver.pause(300);
+    return { success: true, decision };
   }
 
-  // Brief wait for action to register
-  await driver.pause(300);
+  // Final fallback: calibrated positions (still with the 100ms pause)
+  const pos = getActionButtonPosition(decision.action);
+  console.log(`   ⚡ Fallback tap ${targetText} at (${pos.x}, ${pos.y})`);
+  await driver.action('pointer')
+    .move({ x: pos.x, y: pos.y })
+    .down()
+    .pause(100)
+    .up()
+    .perform();
 
-  return { success: clicked, decision };
+  await driver.pause(300);
+  return { success: true, decision };
 }
 
