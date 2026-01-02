@@ -6,10 +6,13 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Platform } from '@ai-ui/core';
 
+export type DeviceType = 'ios' | 'android';
+
 export interface OrchestratorConfig {
   specPath?: string;
   englishInput?: string;
   platforms: Platform[];
+  deviceType: DeviceType;
   baseUrl: string;
   appPath?: string;
   outDir: string;
@@ -35,6 +38,7 @@ export interface ConfigInput {
   specPath?: string;
   englishInput?: string;
   platforms: Platform[];
+  deviceType?: DeviceType;
   baseUrl: string;
   appPath?: string;
   outDir: string;
@@ -61,6 +65,7 @@ export function loadConfig(input: ConfigInput): OrchestratorConfig {
     ...input,
     outDir,
     targetsPath,
+    deviceType: input.deviceType || 'ios',
     timeout: input.timeout || 30000,
     realExecution: input.realExecution ?? false,
     // Load from environment with defaults

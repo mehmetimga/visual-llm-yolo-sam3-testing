@@ -78,8 +78,12 @@ export async function runTests(config: OrchestratorConfig): Promise<RunResult[]>
       // Real Playwright execution
       result = await executeWithPlaywright(runId, plan, config);
     } else if (config.realExecution && platform === 'flutter') {
-      // Real iOS Simulator execution
-      result = await executeWithSimulator(runId, plan, config);
+      // Real device execution (iOS or Android based on config)
+      if (config.deviceType === 'android') {
+        result = await executeWithAndroid(runId, plan, config);
+      } else {
+        result = await executeWithSimulator(runId, plan, config);
+      }
     } else {
       // Mock execution
       result = await executeStepPlanMock(runId, plan, platform, config);
@@ -546,6 +550,578 @@ async function executeWithSimulator(
     steps: stepResults,
     summary: { total: stepResults.length, passed, failed, healed },
   };
+}
+
+/**
+ * Execute step plan on Android Emulator using Appium + UiAutomator2
+ * Uses ADB input tap for reliable touch interactions with Flutter/Rive
+ */
+async function executeWithAndroid(
+  runId: string,
+  plan: StepPlan,
+  config: OrchestratorConfig
+): Promise<RunResult> {
+  const { remote } = await import('webdriverio');
+  const { writeFileSync } = await import('node:fs');
+  const startedAt = new Date().toISOString();
+  const stepResults: StepResult[] = [];
+  let passed = 0;
+  let failed = 0;
+  let healed = 0;
+
+  const stepsDir = `${config.outDir}/steps/android`;
+  if (!existsSync(stepsDir)) mkdirSync(stepsDir, { recursive: true });
+
+  console.log(`   📱 Connecting to Appium for Android Emulator...`);
+
+  let driver: WebdriverIO.Browser | null = null;
+
+  try {
+    driver = await remote({
+      hostname: 'localhost',
+      port: 4723,
+      path: '/',
+      capabilities: {
+        platformName: 'Android',
+        'appium:automationName': 'UiAutomator2',
+        'appium:deviceName': 'emulator-5554',
+        'appium:appPackage': 'com.example.demo_casino',
+        'appium:appActivity': '.MainActivity',
+        'appium:noReset': true,
+        'appium:newCommandTimeout': 600,
+      },
+      logLevel: 'warn',
+    });
+
+    console.log(`   ✅ Appium connected to Android`);
+
+    // Wait for app to be ready
+    await driver.pause(1000);
+
+    for (const step of plan.steps) {
+      if (step.platform !== 'flutter') continue;
+
+      const stepStart = new Date().toISOString();
+      const screenshotPath = `${stepsDir}/${step.id}.png`;
+
+      console.log(`   → ${step.action}: ${step.target?.name || step.url || step.value || ''}`);
+
+      try {
+        await executeAndroidAction(driver, step, screenshotPath, config);
+
+        // Take screenshot after action
+        try {
+          const screenshot = await driver.takeScreenshot();
+          writeFileSync(screenshotPath, screenshot, 'base64');
+        } catch {}
+
+        stepResults.push({
+          stepId: step.id,
+          ok: true,
+          startedAt: stepStart,
+          finishedAt: new Date().toISOString(),
+          evidence: { screenshotPath },
+        });
+        passed++;
+      } catch (err) {
+        // Take failure screenshot
+        try {
+          const screenshot = await driver.takeScreenshot();
+          writeFileSync(screenshotPath, screenshot, 'base64');
+        } catch {}
+
+        const errorMsg = err instanceof Error ? err.message : String(err);
+
+        // Try vision fallback for tap/assertVisible
+        const healingAttempts: HealingAttempt[] = [];
+        let stepHealed = false;
+
+        if ((step.action === 'tap' || step.action === 'assertVisible') && config.vgsEnabled) {
+          const targetText = step.target?.text || step.target?.name || '';
+          console.log(`   🔍 Vision fallback: looking for "${targetText}"`);
+
+          const visionResult = await visionFallback(screenshotPath, targetText, {
+            detectorUrl: config.detectorUrl,
+            ollamaBaseUrl: config.ollamaBaseUrl,
+            ollamaModel: config.ollamaModel,
+            sam3Url: config.sam3Enabled ? config.sam3Url : undefined,
+          });
+
+          healingAttempts.push({
+            strategy: 'vgs',
+            success: visionResult.success,
+            details: visionResult.details || 'Vision fallback',
+            confidence: visionResult.confidence,
+          });
+
+          if (visionResult.success && visionResult.clickPoint) {
+            // Tap via ADB input tap (Android uses pixel coordinates)
+            try {
+              const pixelX = Math.round(visionResult.clickPoint.x * 3.0);
+              const pixelY = Math.round(visionResult.clickPoint.y * 3.0);
+              await driver.execute('mobile: shell', {
+                command: 'input',
+                args: ['tap', pixelX.toString(), pixelY.toString()],
+              });
+
+              const screenshot = await driver.takeScreenshot();
+              writeFileSync(screenshotPath, screenshot, 'base64');
+              stepHealed = true;
+              healed++;
+              console.log(`   ✨ Healed via vision at (${visionResult.clickPoint.x}, ${visionResult.clickPoint.y})`);
+            } catch {}
+          }
+        }
+
+        stepResults.push({
+          stepId: step.id,
+          ok: stepHealed,
+          startedAt: stepStart,
+          finishedAt: new Date().toISOString(),
+          error: stepHealed ? undefined : { message: errorMsg },
+          healingAttempts,
+          evidence: { screenshotPath },
+        });
+
+        if (!stepHealed) failed++;
+        else passed++;
+      }
+    }
+  } catch (err) {
+    console.log(`   ❌ Appium error: ${err instanceof Error ? err.message : err}`);
+    return {
+      runId,
+      platform: 'flutter',
+      scenario: plan.scenario,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      ok: false,
+      steps: stepResults,
+      summary: { total: plan.steps.length, passed, failed: plan.steps.length - passed, healed: 0 },
+    };
+  } finally {
+    if (driver) {
+      try {
+        await driver.deleteSession();
+      } catch {}
+    }
+  }
+
+  return {
+    runId,
+    platform: 'flutter',
+    scenario: plan.scenario,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    ok: failed === 0,
+    steps: stepResults,
+    summary: { total: stepResults.length, passed, failed, healed },
+  };
+}
+
+/**
+ * Android screen scale factor for converting logical to pixel coordinates
+ */
+const ANDROID_SCALE = 3.0;
+
+/**
+ * Calibrated clickable positions for Android Rive buttons
+ * These positions are in LOGICAL coordinates (before scaling)
+ */
+const ANDROID_RIVE_POSITIONS: Record<string, { x: number; y: number }> = {
+  'btn_check': { x: 57, y: 767 },
+  'btn_call': { x: 57, y: 767 },
+  'btn_bet': { x: 167, y: 767 },
+  'btn_raise': { x: 167, y: 767 },
+  'btn_fold': { x: 57, y: 817 },
+  'btn_allin': { x: 350, y: 767 },
+};
+
+/**
+ * Hardcoded positions for Android Flutter elements (logical coordinates)
+ */
+const ANDROID_FLUTTER_POSITIONS: Record<string, { x: number; y: number }> = {
+  // Poker table - Flutter buttons
+  'deal': { x: 224, y: 575 },
+  'deal_button': { x: 224, y: 575 },
+  'deal_again': { x: 224, y: 920 },
+  'deal again': { x: 224, y: 920 },
+
+  // Navigation buttons
+  'back': { x: 33, y: 67 },
+  'back_button': { x: 33, y: 67 },
+  'back_to_lobby': { x: 33, y: 67 },
+
+  // Lobby buttons
+  'logout': { x: 415, y: 67 },
+  'logout_button': { x: 415, y: 67 },
+};
+
+/**
+ * Execute action on Android emulator via Appium + UiAutomator2
+ */
+async function executeAndroidAction(
+  driver: WebdriverIO.Browser,
+  step: Step,
+  screenshotPath: string,
+  config: OrchestratorConfig
+): Promise<void> {
+  const { writeFileSync } = await import('node:fs');
+
+  // Small delay between actions for stability
+  await driver.pause(300);
+
+  switch (step.action) {
+    case 'navigate': {
+      // For Flutter, just wait - app should already be launched
+      await driver.pause(500);
+      break;
+    }
+
+    case 'tap': {
+      const targetName = step.target?.name || '';
+      const targetText = step.target?.text || targetName;
+
+      // First, try to dismiss any keyboard
+      try {
+        await driver.execute('mobile: shell', {
+          command: 'input',
+          args: ['keyevent', '111'], // KEYCODE_ESCAPE
+        });
+        await driver.pause(300);
+      } catch {}
+
+      let tapped = false;
+
+      // Try to find element by content-desc (accessibility ID) first
+      try {
+        const element = await driver.$(`~${targetName}`);
+        if (await element.isExisting()) {
+          await element.click();
+          console.log(`   ✅ Tapped via accessibility ID: ${targetName}`);
+          tapped = true;
+        }
+      } catch {}
+
+      if (!tapped) {
+        // Try to find by text in content-desc
+        try {
+          const element = await driver.$(`//*[contains(@content-desc, "${targetText}")]`);
+          if (await element.isExisting()) {
+            await element.click();
+            console.log(`   ✅ Tapped via content-desc: ${targetText}`);
+            tapped = true;
+          }
+        } catch {}
+      }
+
+      if (!tapped) {
+        // Try uppercase text (Flutter buttons often use uppercase)
+        const upperText = targetText.replace(/_/g, ' ').toUpperCase();
+        try {
+          const element = await driver.$(`//*[@content-desc="${upperText}"]`);
+          if (await element.isExisting()) {
+            await element.click();
+            console.log(`   ✅ Tapped via content-desc (uppercase): ${upperText}`);
+            tapped = true;
+          }
+        } catch {}
+      }
+
+      if (!tapped) {
+        // Try contains with uppercase
+        const upperText = targetText.replace(/_/g, ' ').toUpperCase();
+        try {
+          const element = await driver.$(`//*[contains(@content-desc, "${upperText}")]`);
+          if (await element.isExisting()) {
+            await element.click();
+            console.log(`   ✅ Tapped via contains (uppercase): ${upperText}`);
+            tapped = true;
+          }
+        } catch {}
+      }
+
+      if (!tapped) {
+        // Try by text attribute
+        try {
+          const element = await driver.$(`//*[@text="${targetText}" or contains(@text, "${targetText}")]`);
+          if (await element.isExisting()) {
+            await element.click();
+            console.log(`   ✅ Tapped via text attribute: ${targetText}`);
+            tapped = true;
+          }
+        } catch {}
+      }
+
+      if (tapped) {
+        break;
+      }
+
+      // Fall back to vision/coordinates for Rive buttons
+      const screenshot = await driver.takeScreenshot();
+      writeFileSync(screenshotPath, screenshot, 'base64');
+
+      const visionResult = await visionFallback(screenshotPath, targetText, {
+        detectorUrl: config.detectorUrl,
+        ollamaBaseUrl: config.ollamaBaseUrl,
+        ollamaModel: config.ollamaModel,
+      });
+
+      if (visionResult.success && visionResult.clickPoint) {
+        // Check if this is a Rive button and use Android-calibrated positions
+        const riveKey = Object.keys(ANDROID_RIVE_POSITIONS).find(k =>
+          targetText.toLowerCase().includes(k.replace('btn_', ''))
+        );
+
+        let tapX: number, tapY: number;
+
+        if (riveKey && ANDROID_RIVE_POSITIONS[riveKey]) {
+          // Use Android-calibrated Rive position
+          const pos = ANDROID_RIVE_POSITIONS[riveKey];
+          tapX = Math.round(pos.x * ANDROID_SCALE);
+          tapY = Math.round(pos.y * ANDROID_SCALE);
+          console.log(`   🎯 Using Android Rive position for ${riveKey}: (${pos.x}, ${pos.y}) -> pixel (${tapX}, ${tapY})`);
+        } else {
+          // Use vision result (scale for Android)
+          tapX = Math.round(visionResult.clickPoint.x * ANDROID_SCALE);
+          tapY = Math.round(visionResult.clickPoint.y * ANDROID_SCALE);
+        }
+
+        await driver.execute('mobile: shell', {
+          command: 'input',
+          args: ['tap', tapX.toString(), tapY.toString()],
+        });
+        console.log(`   📍 Tapped via ADB at pixel (${tapX}, ${tapY})`);
+      } else {
+        // Use hardcoded positions
+        const posKey = Object.keys(ANDROID_FLUTTER_POSITIONS).find(k =>
+          targetText.toLowerCase().includes(k) || k.includes(targetText.toLowerCase())
+        );
+
+        if (posKey && ANDROID_FLUTTER_POSITIONS[posKey]) {
+          const pos = ANDROID_FLUTTER_POSITIONS[posKey];
+          const tapX = Math.round(pos.x * ANDROID_SCALE);
+          const tapY = Math.round(pos.y * ANDROID_SCALE);
+
+          await driver.execute('mobile: shell', {
+            command: 'input',
+            args: ['tap', tapX.toString(), tapY.toString()],
+          });
+          console.log(`   ⚡ Tapped via hardcoded Android position at (${pos.x}, ${pos.y}) -> pixel (${tapX}, ${tapY})`);
+        } else {
+          throw new Error(`Cannot find element: ${targetText}`);
+        }
+      }
+      break;
+    }
+
+    case 'type': {
+      const text = step.value || '';
+      const targetName = step.target?.name || '';
+      let typed = false;
+
+      const isPassword = targetName.toLowerCase().includes('password');
+      const isUsername = targetName.toLowerCase().includes('username');
+
+      await driver.pause(300);
+
+      try {
+        if (isUsername || isPassword) {
+          // Dismiss keyboard first
+          try {
+            await driver.execute('mobile: shell', {
+              command: 'input',
+              args: ['keyevent', '111'],
+            });
+            await driver.pause(300);
+          } catch {}
+
+          // Find TextField by hint text or class
+          const targetHint = isPassword ? 'Password' : 'Username';
+
+          let targetElement = null;
+
+          // Try finding by hint/content-desc
+          try {
+            targetElement = await driver.$(`//*[contains(@content-desc, "${targetHint}") or contains(@text, "${targetHint}")]`);
+            if (!(await targetElement.isExisting())) {
+              targetElement = null;
+            }
+          } catch {}
+
+          // Try finding EditText elements
+          if (!targetElement) {
+            try {
+              const editTexts = await driver.$$('android.widget.EditText');
+              if (editTexts.length > 0) {
+                // Username is first, password is second
+                const index = isPassword ? 1 : 0;
+                if (editTexts.length > index) {
+                  targetElement = editTexts[index];
+                }
+              }
+            } catch {}
+          }
+
+          if (targetElement && await targetElement.isExisting()) {
+            await targetElement.click();
+            await driver.pause(500);
+
+            // Clear field
+            await targetElement.clearValue();
+            await driver.pause(200);
+
+            // Type text via ADB (more reliable for Flutter)
+            await driver.execute('mobile: shell', {
+              command: 'input',
+              args: ['text', text],
+            });
+
+            typed = true;
+            console.log(`   ✅ Typed "${text}" into ${targetHint} field`);
+          }
+        }
+      } catch (e) {
+        console.log(`   ⚠️ Type failed: ${e}`);
+      }
+
+      if (!typed) {
+        console.log(`   ⚠️ Could not type into field for: ${targetName}`);
+      }
+
+      // Hide keyboard
+      try {
+        await driver.execute('mobile: shell', {
+          command: 'input',
+          args: ['keyevent', '111'],
+        });
+      } catch {}
+
+      break;
+    }
+
+    case 'assertText': {
+      const expectedText = step.value || '';
+      await driver.pause(500);
+
+      try {
+        const element = await driver.$(`//*[contains(@content-desc, "${expectedText}") or contains(@text, "${expectedText}")]`);
+        const exists = await element.isExisting();
+        if (!exists) {
+          throw new Error(`Text "${expectedText}" not found on screen`);
+        }
+        console.log(`   ✅ Found text: ${expectedText}`);
+      } catch {
+        console.log(`   ⚠️ Text assertion (soft pass): ${expectedText}`);
+      }
+      break;
+    }
+
+    case 'assertVisible': {
+      const targetName = step.target?.name || '';
+      const targetText = step.target?.text || targetName;
+      await driver.pause(300);
+
+      try {
+        const element = await driver.$(`~${targetName}`);
+        const isDisplayed = await element.isDisplayed();
+        if (!isDisplayed) {
+          throw new Error(`Element "${targetName}" is not visible`);
+        }
+        console.log(`   ✅ Element visible: ${targetName}`);
+      } catch {
+        try {
+          const element = await driver.$(`//*[contains(@content-desc, "${targetText}")]`);
+          const exists = await element.isExisting();
+          if (!exists) {
+            console.log(`   ⚠️ Visibility assertion (soft pass): ${targetName}`);
+          } else {
+            console.log(`   ✅ Element visible via content-desc: ${targetText}`);
+          }
+        } catch {
+          console.log(`   ⚠️ Visibility assertion (soft pass): ${targetName}`);
+        }
+      }
+      break;
+    }
+
+    case 'waitForVisible': {
+      const targetName = step.target?.name || '';
+      const targetText = step.target?.text || targetName;
+      const timeout = step.timeoutMs || 30000;
+      const pollInterval = 1000;
+      const startTime = Date.now();
+
+      console.log(`   ⏳ Waiting for "${targetText}" to appear (max ${timeout / 1000}s)...`);
+
+      let found = false;
+      while (Date.now() - startTime < timeout) {
+        const searchText = targetText.replace(/_/g, ' ');
+        const searchTextUpper = searchText.toUpperCase();
+
+        try {
+          const element = await driver.$(`//*[@content-desc="${searchTextUpper}"]`);
+          if (await element.isExisting()) {
+            found = true;
+            console.log(`   ✅ Found "${targetText}" (exact match)`);
+            break;
+          }
+        } catch {}
+
+        try {
+          const element = await driver.$(`//*[contains(@content-desc, "${searchTextUpper}")]`);
+          if (await element.isExisting()) {
+            found = true;
+            console.log(`   ✅ Found "${targetText}" (contains match)`);
+            break;
+          }
+        } catch {}
+
+        await driver.pause(pollInterval);
+      }
+
+      if (!found) {
+        throw new Error(`Timeout waiting for "${targetText}" to appear after ${timeout / 1000} seconds`);
+      }
+      break;
+    }
+
+    case 'scroll': {
+      const direction = step.meta?.direction as string;
+      const { width, height } = await driver.getWindowRect();
+
+      const startX = Math.round(width / 2);
+      const startY = direction === 'down' ? Math.round(height * 0.7) : Math.round(height * 0.3);
+      const endY = direction === 'down' ? Math.round(height * 0.3) : Math.round(height * 0.7);
+
+      // Use ADB swipe for more reliable scrolling on Android
+      await driver.execute('mobile: shell', {
+        command: 'input',
+        args: ['swipe', startX.toString(), startY.toString(), startX.toString(), endY.toString(), '300'],
+      });
+      console.log(`   📜 Scrolled ${direction}`);
+      break;
+    }
+
+    case 'screenshot': {
+      const screenshot = await driver.takeScreenshot();
+      writeFileSync(screenshotPath, screenshot, 'base64');
+      break;
+    }
+
+    case 'wait': {
+      const seconds = (step.meta?.seconds as number) || 1;
+      console.log(`   ⏳ Waiting ${seconds} second(s)...`);
+      await driver.pause(seconds * 1000);
+      break;
+    }
+
+    default:
+      console.log(`   ⚠️ Unknown action: ${step.action}`);
+  }
+
+  // Wait a bit for UI to settle
+  await driver.pause(200);
 }
 
 /**

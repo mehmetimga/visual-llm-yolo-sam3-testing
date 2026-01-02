@@ -25,6 +25,7 @@ program
   .option('-s, --spec <path>', 'Path to .feature spec file')
   .option('-e, --english <text>', 'English test description')
   .option('-p, --platform <platforms>', 'Target platforms: web, mobile, or web,mobile', 'web')
+  .option('-d, --device <type>', 'Device type: ios or android (for flutter platform)', 'ios')
   .option('-b, --baseUrl <url>', 'Base URL for web tests', 'http://localhost:3000')
   .option('-a, --appPath <path>', 'Path to Flutter app (APK/IPA)')
   .option('-o, --outDir <path>', 'Output directory for artifacts', './out')
@@ -52,6 +53,7 @@ program
         specPath: options.spec,
         englishInput: options.english,
         platforms,
+        deviceType: options.device as 'ios' | 'android',
         baseUrl: options.baseUrl,
         appPath: options.appPath,
         outDir: options.outDir,
