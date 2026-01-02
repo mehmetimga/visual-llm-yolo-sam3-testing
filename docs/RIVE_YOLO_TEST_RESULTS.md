@@ -15,41 +15,35 @@ YOLO visual coordinates don't match clickable positions. The solution is to use 
 
 ---
 
-## Prerequisites
+## Quick Start
 
-### Common Requirements
+### Prerequisites
 
 - YOLO detector running on `http://localhost:8001`
 - Appium server running on `http://127.0.0.1:4723`
 - Demo casino app installed on device/simulator
 
-### iOS
+### Run Tests
 
 ```bash
-# Start iOS Simulator
+# iOS (start Simulator first)
 open -a Simulator
-
-# Start Appium
 appium
+npx tsx scripts/test_poker_game.ts --platform=ios --rounds=5
 
-# Run test
-npx tsx scripts/test_rive_yolo_mapping.ts --rounds=5 --actions=5
-```
-
-### Android
-
-```bash
-# Start Android Emulator
+# Android (start Emulator first, use special Appium flag)
 emulator -avd <avd_name>
-
-# Start Appium with ADB shell enabled (required for Android)
-ANDROID_HOME=~/Library/Android/sdk \
-ANDROID_SDK_ROOT=~/Library/Android/sdk \
 appium --allow-insecure=uiautomator2:adb_shell
-
-# Run test
-npx tsx scripts/test_rive_yolo_mapping_android.ts --rounds=3 --actions=5
+npx tsx scripts/test_poker_game.ts --platform=android --rounds=5
 ```
+
+### Command Line Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--platform=` | `ios` | Platform: `ios` or `android` |
+| `--rounds=` | `5` | Number of lobby→poker→lobby cycles |
+| `--actions=` | `5` | Max actions per hand |
 
 ---
 
@@ -57,10 +51,10 @@ npx tsx scripts/test_rive_yolo_mapping_android.ts --rounds=3 --actions=5
 
 1. **Casino Lobby → Poker Table**: Click "PLAY POKER" button
 2. **Start Game**: Click DEAL button
-3. **Play Poker**: YOLO detects buttons → map to clickable coords → tap
-4. **Wait for Game End**: Detect "DEAL AGAIN" button
+3. **Play Hands**: YOLO detects buttons → map to clickable coords → tap
+4. **Wait for Hand End**: Detect "DEAL AGAIN" button, click to continue
 5. **Return to Lobby**: Tap back button
-6. **Repeat**: For specified number of rounds
+6. **Repeat**: For specified number of rounds (3 hands per round)
 
 ---
 
@@ -110,6 +104,7 @@ await driver.execute('mobile: shell', {
 const CLICKABLE_POSITIONS = {
   CHECK: { x: 60, y: 680 },
   CALL:  { x: 60, y: 680 },
+  BET:   { x: 190, y: 680 },
   RAISE: { x: 190, y: 680 },
   FOLD:  { x: 60, y: 780 },
   BACK:  { x: 32, y: 90 },
@@ -212,12 +207,11 @@ The FOLD button is visually on the RIGHT but clickable on the LEFT.
 
 | File | Description |
 |------|-------------|
-| `scripts/test_rive_yolo_mapping.ts` | iOS test script |
-| `scripts/test_rive_yolo_mapping_android.ts` | Android test script |
+| `scripts/test_poker_game.ts` | Unified iOS/Android test script |
 
 ---
 
 ## Output Locations
 
-- **iOS:** `apps/orchestrator/out/rive_yolo_mapping_test/`
-- **Android:** `apps/orchestrator/out/rive_yolo_android/`
+- **iOS:** `apps/orchestrator/out/poker_test_ios/`
+- **Android:** `apps/orchestrator/out/poker_test_android/`

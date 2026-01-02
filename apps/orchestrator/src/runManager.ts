@@ -483,11 +483,12 @@ async function executeWithSimulator(
           });
 
           if (visionResult.success && visionResult.clickPoint) {
-            // Click at detected position via Appium
+            // Click at detected position via Appium (100ms pause for Rive)
             try {
               await driver.action('pointer')
                 .move({ x: visionResult.clickPoint.x, y: visionResult.clickPoint.y })
                 .down()
+                .pause(100)
                 .up()
                 .perform();
               
@@ -605,9 +606,11 @@ async function executeAppiumAction(
       if (ambiguousTargets.includes(targetName)) {
         const pos = getFlutterElementPosition(targetName);
         if (pos) {
+          // Use 100ms pause between down/up - required for Rive buttons to register
           await driver.action('pointer')
             .move({ x: pos.x, y: pos.y })
             .down()
+            .pause(100)
             .up()
             .perform();
           console.log(`   🎯 Tapped ${targetName} via hardcoded position at (${pos.x}, ${pos.y})`);
@@ -655,12 +658,26 @@ async function executeAppiumAction(
 
       if (!tapped && targetText) {
         // Try uppercase version (Flutter buttons often use uppercase text)
-        const upperText = targetText.toUpperCase();
+        // Convert underscores to spaces for button labels (e.g., "deal_again" -> "DEAL AGAIN")
+        const upperText = targetText.replace(/_/g, ' ').toUpperCase();
         try {
           element = await driver.$(`//XCUIElementTypeButton[@label="${upperText}" or @name="${upperText}"]`);
           if (await element.isExisting()) {
             await element.click();
             console.log(`   ✅ Tapped button via XPath (uppercase): ${upperText}`);
+            tapped = true;
+          }
+        } catch {}
+      }
+
+      if (!tapped && targetText) {
+        // Try contains match with uppercase and spaces (for partial matches)
+        const upperText = targetText.replace(/_/g, ' ').toUpperCase();
+        try {
+          element = await driver.$(`//*[contains(@label, "${upperText}") or contains(@name, "${upperText}")]`);
+          if (await element.isExisting()) {
+            await element.click();
+            console.log(`   ✅ Tapped via contains (uppercase): ${upperText}`);
             tapped = true;
           }
         } catch {}
@@ -693,9 +710,11 @@ async function executeAppiumAction(
       });
       
       if (visionResult.success && visionResult.clickPoint) {
+        // Use 100ms pause between down/up - required for Rive buttons to register
         await driver.action('pointer')
           .move({ x: visionResult.clickPoint.x, y: visionResult.clickPoint.y })
           .down()
+          .pause(100)
           .up()
           .perform();
         console.log(`   📍 Tapped via vision at (${visionResult.clickPoint.x}, ${visionResult.clickPoint.y})`);
@@ -703,9 +722,11 @@ async function executeAppiumAction(
         // Use hardcoded positions
         const pos = getFlutterElementPosition(targetText);
         if (pos) {
+          // Use 100ms pause between down/up - required for Rive buttons to register
           await driver.action('pointer')
             .move({ x: pos.x, y: pos.y })
             .down()
+            .pause(100)
             .up()
             .perform();
           console.log(`   ⚡ Tapped via hardcoded position at (${pos.x}, ${pos.y})`);
@@ -913,14 +934,58 @@ async function executeAppiumAction(
       break;
     }
 
+    case 'waitForVisible': {
+      const targetName = step.target?.name || '';
+      const targetText = step.target?.text || targetName;
+      const timeout = step.timeoutMs || 30000; // Default 30 second timeout
+      const pollInterval = 1000; // Check every second
+      const startTime = Date.now();
+
+      console.log(`   ⏳ Waiting for "${targetText}" to appear (max ${timeout / 1000}s)...`);
+
+      let found = false;
+      while (Date.now() - startTime < timeout) {
+        // Try to find by text (with space conversion for underscore names)
+        const searchText = targetText.replace(/_/g, ' ');
+        const searchTextUpper = searchText.toUpperCase();
+
+        try {
+          // Try exact match first
+          const element = await driver.$(`//*[@label="${searchTextUpper}" or @name="${searchTextUpper}"]`);
+          if (await element.isExisting()) {
+            found = true;
+            console.log(`   ✅ Found "${targetText}" (exact match)`);
+            break;
+          }
+        } catch {}
+
+        try {
+          // Try contains match
+          const element = await driver.$(`//*[contains(@label, "${searchTextUpper}") or contains(@name, "${searchTextUpper}")]`);
+          if (await element.isExisting()) {
+            found = true;
+            console.log(`   ✅ Found "${targetText}" (contains match)`);
+            break;
+          }
+        } catch {}
+
+        await driver.pause(pollInterval);
+      }
+
+      if (!found) {
+        throw new Error(`Timeout waiting for "${targetText}" to appear after ${timeout / 1000} seconds`);
+      }
+      break;
+    }
+
     case 'scroll': {
       const direction = step.meta?.direction as string;
       const { width, height } = await driver.getWindowRect();
-      
+
       const startX = width / 2;
       const startY = direction === 'down' ? height * 0.7 : height * 0.3;
       const endY = direction === 'down' ? height * 0.3 : height * 0.7;
-      
+
       await driver.action('pointer')
         .move({ x: startX, y: startY })
         .down()
@@ -1116,25 +1181,29 @@ function getFlutterElementPosition(targetName: string): { x: number; y: number }
     'stand_button': { x: 280, y: 500 },
     'stand': { x: 280, y: 500 },
     
-    // Poker table screen - DEAL button in center of table
+    // Poker table screen - DEAL button (Flutter button, not Rive)
     'deal_button': { x: 215, y: 575 },
     'deal': { x: 215, y: 575 },
-    'deal_again': { x: 215, y: 575 },
-    'deal again': { x: 215, y: 575 },
-    
-    // Poker table screen - action buttons at bottom row (iPhone 16 Pro Max: 430x932)
-    // 4 buttons evenly spaced: FOLD | CALL/CHECK | RAISE | ALL IN
-    'fold_button': { x: 55, y: 905 },
-    'fold': { x: 55, y: 905 },
-    'check_button': { x: 160, y: 905 },    // CHECK replaces CALL when no bet
-    'check': { x: 160, y: 905 },
-    'call_button': { x: 160, y: 905 },     // CALL is in same position as CHECK  
-    'call': { x: 160, y: 905 },
-    'raise_button': { x: 265, y: 905 },
-    'raise': { x: 265, y: 905 },
-    'all_in_button': { x: 370, y: 905 },
-    'all_in': { x: 370, y: 905 },
-    'allin': { x: 370, y: 905 },
+    'deal_again': { x: 215, y: 870 },      // DEAL AGAIN is at bottom after hand ends
+    'deal again': { x: 215, y: 870 },
+
+    // Poker table screen - RIVE action buttons (calibrated clickable positions)
+    // IMPORTANT: These are the CLICKABLE positions, NOT the visual positions!
+    // Rive renders buttons visually at different locations than where they respond to taps
+    // See docs/RIVE_YOLO_TEST_RESULTS.md for details
+    'fold_button': { x: 60, y: 780 },      // FOLD - bottom left
+    'fold': { x: 60, y: 780 },
+    'check_button': { x: 60, y: 680 },     // CHECK - left side (same as CALL)
+    'check': { x: 60, y: 680 },
+    'call_button': { x: 60, y: 680 },      // CALL - left side (same as CHECK)
+    'call': { x: 60, y: 680 },
+    'bet_button': { x: 190, y: 680 },      // BET - center (same as RAISE)
+    'bet': { x: 190, y: 680 },
+    'raise_button': { x: 190, y: 680 },    // RAISE - center (same as BET)
+    'raise': { x: 190, y: 680 },
+    'all_in_button': { x: 380, y: 680 },   // ALL IN - right side
+    'all_in': { x: 380, y: 680 },
+    'allin': { x: 380, y: 680 },
   };
 
   for (const [key, pos] of Object.entries(positions)) {

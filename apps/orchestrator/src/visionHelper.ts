@@ -51,17 +51,28 @@ export async function visionFallback(
       const match = findBestMatch(detections, targetText);
 
       if (match) {
-        let clickPoint = getCenterPoint(match.bbox);
+        let clickPoint: { x: number; y: number };
 
-        // Try SAM-3 for precise segmentation if available
-        if (config.sam3Url) {
-          const refinedPoint = await refineWithSam3(screenshotPath, match.bbox, config.sam3Url);
-          if (refinedPoint) {
-            clickPoint = refinedPoint;
+        // For Rive buttons (btn_*), use calibrated positions instead of visual coordinates
+        // IMPORTANT: YOLO visual coords don't match where Rive buttons respond to taps!
+        const rivePosition = match.type ? getRiveButtonPosition(match.type) : null;
+        if (rivePosition) {
+          clickPoint = rivePosition;
+          console.log(`   ✅ YOLO matched "${targetText}" to Rive button type="${match.type}" -> calibrated position (${clickPoint.x}, ${clickPoint.y})`);
+        } else {
+          // For non-Rive elements, use the center of the YOLO bbox
+          clickPoint = getCenterPoint(match.bbox);
+
+          // Try SAM-3 for precise segmentation if available
+          if (config.sam3Url) {
+            const refinedPoint = await refineWithSam3(screenshotPath, match.bbox, config.sam3Url);
+            if (refinedPoint) {
+              clickPoint = refinedPoint;
+            }
           }
+          console.log(`   ✅ YOLO matched "${targetText}" to type="${match.type}" at (${clickPoint.x}, ${clickPoint.y})`);
         }
 
-        console.log(`   ✅ YOLO matched "${targetText}" to type="${match.type}" at (${clickPoint.x}, ${clickPoint.y})`);
         return {
           success: true,
           clickPoint,
@@ -236,6 +247,29 @@ function parseVlmResponse(response: string): { x?: number; y?: number; confidenc
 }
 
 /**
+ * Calibrated clickable positions for Rive poker buttons on iOS
+ * IMPORTANT: YOLO visual coordinates do NOT match clickable positions!
+ * Use YOLO for TYPE detection only, then map to these calibrated positions.
+ * See docs/RIVE_YOLO_TEST_RESULTS.md for details.
+ */
+const RIVE_BUTTON_POSITIONS: Record<string, { x: number; y: number }> = {
+  'btn_check': { x: 60, y: 680 },
+  'btn_call': { x: 60, y: 680 },
+  'btn_bet': { x: 190, y: 680 },
+  'btn_raise': { x: 190, y: 680 },
+  'btn_fold': { x: 60, y: 780 },
+  'btn_allin': { x: 380, y: 680 },
+};
+
+/**
+ * Get calibrated position for Rive button type
+ */
+function getRiveButtonPosition(detType: string): { x: number; y: number } | null {
+  const type = detType.toLowerCase();
+  return RIVE_BUTTON_POSITIONS[type] || null;
+}
+
+/**
  * Find best matching detection for target text
  */
 function findBestMatch(
@@ -280,6 +314,13 @@ function findBestMatch(
       const buttonKeywords = ['back', 'login', 'log in', 'play', 'spin', 'deal', 'hit', 'stand', 'join', 'logout', 'bet'];
       if (buttonKeywords.some(kw => target.includes(kw))) {
         score = 0.4;  // Generic button match
+      }
+    }
+    // Match Rive button types (btn_call matches "call", btn_fold matches "fold", etc.)
+    else if (det.type?.startsWith('btn_')) {
+      const btnName = det.type.replace('btn_', '');
+      if (target.includes(btnName) || btnName.includes(target)) {
+        score = 0.95;  // Very high score for Rive button type match
       }
     }
 
@@ -346,45 +387,76 @@ async function refineWithSam3(
 /**
  * Hardcoded fallback positions for demo elements
  * These are approximate positions based on the demo app layout
+ * iPhone iOS positions (430x932 logical points for iPhone 16 Pro Max)
  */
 function getHardcodedFallback(targetText: string): VisionFallbackResult {
   const target = targetText.toLowerCase();
-  
-  // For 1280x720 viewport on slots/blackjack pages
+
+  // iOS positions for iPhone (430x932 logical points)
   const knownPositions: Record<string, { x: number; y: number }> = {
-    'spin': { x: 640, y: 413 },        // SPIN button center
-    'spin_button': { x: 640, y: 413 },
-    '+': { x: 755, y: 495 },           // Bet + button
-    'bet_plus': { x: 755, y: 495 },
-    'bet_plus_button': { x: 755, y: 495 },
-    '-': { x: 515, y: 495 },           // Bet - button
-    'bet_minus': { x: 515, y: 495 },
-    'bet_minus_button': { x: 515, y: 495 },
-    'deal': { x: 640, y: 480 },        // DEAL button (blackjack)
-    'deal_button': { x: 640, y: 480 },
-    'hit': { x: 560, y: 480 },         // HIT button (blackjack)
-    'hit_button': { x: 560, y: 480 },
-    'stand': { x: 720, y: 480 },       // STAND button (blackjack)
-    'stand_button': { x: 720, y: 480 },
-    'back': { x: 87, y: 38 },          // Back to Lobby button (top left)
-    'back_button': { x: 87, y: 38 },
-    'back_to_lobby': { x: 87, y: 38 },
-    'balance': { x: 1170, y: 40 },     // Balance display (top right)
-    'balance_display': { x: 1170, y: 40 },
+    // Poker table - Flutter buttons (NOT Rive)
+    'deal': { x: 215, y: 575 },            // DEAL button
+    'deal_button': { x: 215, y: 575 },
+    'deal again': { x: 215, y: 870 },      // DEAL AGAIN button at bottom
+    'deal_again': { x: 215, y: 870 },
+
+    // Navigation buttons
+    'back': { x: 40, y: 95 },              // Back to Lobby button (top left)
+    'back_button': { x: 40, y: 95 },
+    'back_to_lobby': { x: 40, y: 95 },
+
+    // Lobby buttons
+    'logout': { x: 400, y: 95 },           // Logout icon (top right)
+    'logout_button': { x: 400, y: 95 },
+    'balance': { x: 320, y: 95 },          // Balance display
+    'balance_display': { x: 320, y: 95 },
+
+    // Slots/Blackjack buttons (legacy - for 1280x720 viewport)
+    'spin': { x: 215, y: 500 },
+    'spin_button': { x: 215, y: 500 },
+    '+': { x: 280, y: 600 },
+    'bet_plus': { x: 280, y: 600 },
+    'bet_plus_button': { x: 280, y: 600 },
+    '-': { x: 150, y: 600 },
+    'bet_minus': { x: 150, y: 600 },
+    'bet_minus_button': { x: 150, y: 600 },
+    'hit': { x: 150, y: 500 },
+    'hit_button': { x: 150, y: 500 },
+    'stand': { x: 280, y: 500 },
+    'stand_button': { x: 280, y: 500 },
   };
   
+  // First try exact match
+  if (knownPositions[target]) {
+    return {
+      success: true,
+      clickPoint: knownPositions[target],
+      method: 'hardcoded',
+      confidence: 0.8,
+      details: `Using hardcoded position for "${target}" (exact match)`
+    };
+  }
+
+  // Then try longest partial match to avoid "deal" matching before "deal again"
+  let bestMatch: { key: string; pos: { x: number; y: number } } | null = null;
   for (const [key, pos] of Object.entries(knownPositions)) {
     if (target.includes(key) || key.includes(target)) {
-      return {
-        success: true,
-        clickPoint: pos,
-        method: 'hardcoded',
-        confidence: 0.6,
-        details: `Using hardcoded position for "${key}"`
-      };
+      if (!bestMatch || key.length > bestMatch.key.length) {
+        bestMatch = { key, pos };
+      }
     }
   }
-  
+
+  if (bestMatch) {
+    return {
+      success: true,
+      clickPoint: bestMatch.pos,
+      method: 'hardcoded',
+      confidence: 0.6,
+      details: `Using hardcoded position for "${bestMatch.key}"`
+    };
+  }
+
   return { success: false, method: 'hardcoded', details: 'No hardcoded position' };
 }
 
