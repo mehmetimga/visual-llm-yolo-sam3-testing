@@ -27,9 +27,10 @@ CLASSES = {
     "bet_slider": 8,
 }
 
-# Screen dimensions (iPhone 16 Pro Max)
-SCREEN_WIDTH = 430
-SCREEN_HEIGHT = 932
+# Screen dimensions (iPhone 16 Pro Max simulator - Appium coordinates)
+# Note: Screenshot is 1320x2868 (3x scale), Appium uses 440x956
+SCREEN_WIDTH = 440
+SCREEN_HEIGHT = 956
 
 # Rive panel dimensions
 # Artboard: 375x250, scaled to screen width
@@ -37,17 +38,26 @@ SCREEN_HEIGHT = 932
 RIVE_PANEL_HEIGHT = 286
 RIVE_PANEL_Y_START = SCREEN_HEIGHT - RIVE_PANEL_HEIGHT  # y = 646
 
-# Rive button positions (normalized 0-1 for 430x932 screen)
-# Based on mobile Rive layout: Check/Call (left), Raise (center), Fold (right)
+# Rive button positions (normalized 0-1 for 440x956 screen)
+# IMPORTANT: These are CLICKABLE/TAP positions, NOT visual positions!
+# The Rive animation renders buttons at different locations than where they respond to taps.
+# Visual layout:    CALL(left) | RAISE(center) | FOLD(right)
+# Clickable layout: CALL/FOLD(left, stacked) | RAISE(center)
+#
+# Calculated from working Appium coordinates:
+#   CALL/CHECK: (60, 680)  → normalized: (60/440, 680/956) = (0.1364, 0.7113)
+#   RAISE:      (190, 680) → normalized: (190/440, 680/956) = (0.4318, 0.7113)
+#   FOLD:       (60, 780)  → normalized: (60/440, 780/956) = (0.1364, 0.8159)
 RIVE_BUTTONS = {
-    "btn_fold": {"x": 0.82, "y": 0.935, "w": 0.14, "h": 0.055},
-    "btn_check": {"x": 0.13, "y": 0.88, "w": 0.14, "h": 0.055},
-    "btn_call": {"x": 0.13, "y": 0.88, "w": 0.14, "h": 0.055},
-    "btn_raise": {"x": 0.50, "y": 0.935, "w": 0.18, "h": 0.055},
+    "btn_fold": {"x": 0.1364, "y": 0.8159, "w": 0.14, "h": 0.055},
+    "btn_check": {"x": 0.1364, "y": 0.7113, "w": 0.14, "h": 0.055},
+    "btn_call": {"x": 0.1364, "y": 0.7113, "w": 0.14, "h": 0.055},
+    "btn_raise": {"x": 0.4318, "y": 0.7113, "w": 0.18, "h": 0.055},
 }
 
 # Deal Again button (appears at center, above Rive panel when hand ends)
-DEAL_BUTTON = {"x": 0.5, "y": 0.54, "w": 0.40, "h": 0.055}
+# Working Appium coordinates: (220, 550) → normalized: (220/440, 550/956) = (0.5, 0.5753)
+DEAL_BUTTON = {"x": 0.5, "y": 0.5753, "w": 0.40, "h": 0.055}
 
 # Pot display (center of table, above Rive panel)
 POT_DISPLAY = {"x": 0.5, "y": 0.42, "w": 0.18, "h": 0.06}
