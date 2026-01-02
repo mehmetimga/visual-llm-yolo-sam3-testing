@@ -1,4 +1,0 @@
-back
-logout
-games
-button

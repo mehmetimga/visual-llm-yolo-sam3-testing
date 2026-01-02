@@ -1,2 +1,0 @@
-export DEVELOPER_DIR=/Applications/Xcode-16.4.app/Contents/Developer
-rm -rf ~/Library/Developer/Xcode/DerivedData/Runner-* && cd /Users/mehmetimga/ai-campions/visual-llm-yolo-sam3-testing/apps/demo-flutter && env -i HOME="$HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/Users/mehmetimga/flutter/bin" /Users/mehmetimga/flutter/bin/flutter run -d 4502FBC7-E7FA-4F70-8040-4B5844B6AEDA
