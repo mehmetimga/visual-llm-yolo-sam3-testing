@@ -1332,32 +1332,6 @@ async function getBootedSimulatorId(): Promise<string | null> {
     return null;
   }
 }
-
-/**
- * Helper: Tap an iOS element using W3C pointer actions at its center.
- * This is more reliable than element.click() for Flutter buttons on iOS.
- */
-async function tapElementCenterIOS(
-  driver: WebdriverIO.Browser,
-  element: WebdriverIO.Element
-): Promise<boolean> {
-  try {
-    const loc = await element.getLocation();
-    const size = await element.getSize();
-    const cx = Math.round(loc.x + size.width / 2);
-    const cy = Math.round(loc.y + size.height / 2);
-    await driver.action('pointer')
-      .move({ x: cx, y: cy })
-      .down()
-      .pause(100)
-      .up()
-      .perform();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Execute action on iOS simulator via Appium
  */
