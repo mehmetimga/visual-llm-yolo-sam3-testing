@@ -42,9 +42,11 @@ services:
     volumes:
       - ./apps/orchestrator/out:/app/out:ro
       - ./services/detector/training_data:/app/training_data
+      - ./services/detector/rive_poker_model.pt:/app/rive_poker_model.pt:ro
       - detector_models:/app/runs
     environment:
-      - YOLO_MODEL_PATH=/app/runs/flutter_ui_v1/weights/best.pt
+      # Use the Rive poker UI model so action buttons are detected as btn_* (btn_call/btn_raise/...)
+      - YOLO_MODEL_PATH=/app/rive_poker_model.pt
     restart: unless-stopped
     deploy:
       resources:

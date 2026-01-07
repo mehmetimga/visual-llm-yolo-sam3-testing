@@ -343,6 +343,9 @@ export async function playPokerHand(
   const dealClicked = await clickDealButton(driver);
   if (dealClicked) {
     await driver.pause(800);  // Brief wait for cards to be dealt
+  } else {
+    // If we're resuming with noReset, we might already be mid-hand (action buttons visible).
+    console.log(`   🟡 No DEAL/DEAL AGAIN button visible — likely already in an active hand. Continuing...`);
   }
   
   let lastDecision: PokerDecision = { action: 'check', reasoning: 'Initial', confidence: 0 };

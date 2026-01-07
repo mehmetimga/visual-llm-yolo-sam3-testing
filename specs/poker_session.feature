@@ -17,7 +17,9 @@ Feature: Poker Session - Play 5 Complete Hands
     And I scroll down
     Then I should see text "Poker Table"
     When I tap "poker_table_play_button"
-    Then I should see text "DEAL"
+    # NOTE: Sometimes the app can already be mid-hand (CALL/RAISE/FOLD visible) due to noReset state.
+    # Don't block the run on a specific "DEAL" state; the AI step below handles both "DEAL" and mid-hand states.
+    Then I wait 2 seconds
 
     # === PLAY HANDS (state-agnostic) ===
     # This uses YOLO detections + the proven 100ms press pattern to click Rive buttons.

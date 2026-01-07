@@ -47,7 +47,15 @@ export async function runTests(config: OrchestratorConfig): Promise<RunResult[]>
 
   if (config.specPath) {
     // Parse BDD spec (resolve path from project root)
-    const specFullPath = config.specPath.startsWith('/') ? config.specPath : resolve(process.cwd(), '..', '..', config.specPath);
+    let specFullPath = config.specPath;
+    if (!specFullPath.startsWith('/')) {
+      // Prefer resolving relative to current working directory.
+      // If that doesn't exist, fall back to resolving from repo root (cwd/../../),
+      // which supports calls from apps/orchestrator like: --spec specs/foo.feature
+      const cwdResolved = resolve(process.cwd(), specFullPath);
+      const repoResolved = resolve(process.cwd(), '..', '..', specFullPath);
+      specFullPath = existsSync(cwdResolved) ? cwdResolved : repoResolved;
+    }
     const specContent = readFileSync(specFullPath, 'utf-8');
     const scenarios = parseBddFeature(specContent);
     
@@ -418,7 +426,8 @@ async function executeWithSimulator(
         'appium:udid': deviceId,
         'appium:bundleId': 'com.example.demoCasino', // Flutter app bundle ID
         'appium:noReset': true,
-        'appium:newCommandTimeout': 60,
+        // YOLO + LLM calls can take >60s; avoid Appium killing the session mid-hand.
+        'appium:newCommandTimeout': 600,
         'appium:wdaLaunchTimeout': 60000,
         'appium:wdaConnectionTimeout': 60000,
       },
@@ -429,6 +438,10 @@ async function executeWithSimulator(
 
     // Wait for app to be ready
     await driver.pause(1000);
+
+    // Ensure we start from the login screen for specs that assume a fresh session.
+    // Because we use noReset=true, the simulator may resume in-lobby or mid-game.
+    await ensureAtLoginScreen(driver);
 
     for (const step of plan.steps) {
       if (step.platform !== 'flutter') continue;
@@ -550,6 +563,74 @@ async function executeWithSimulator(
     steps: stepResults,
     summary: { total: stepResults.length, passed, failed, healed },
   };
+}
+
+async function ensureAtLoginScreen(driver: WebdriverIO.Browser): Promise<void> {
+  const hasLoginText = async (): Promise<boolean> => {
+    try {
+      const el = await driver.$(`//*[contains(@label, "Log In") or contains(@name, "Log In") or contains(@label, "LOG IN") or contains(@name, "LOG IN")]`);
+      return await el.isExisting();
+    } catch {
+      return false;
+    }
+  };
+
+  const hasLobbyText = async (): Promise<boolean> => {
+    try {
+      const el = await driver.$(`//*[contains(@label, "Casino Lobby") or contains(@name, "Casino Lobby")]`);
+      return await el.isExisting();
+    } catch {
+      return false;
+    }
+  };
+
+  const hasLoginTextFields = async (): Promise<boolean> => {
+    try {
+      const tfs = await driver.$$('XCUIElementTypeTextField');
+      if (!tfs || tfs.length === 0) return false;
+      // On the login screen we usually have Username + Password fields.
+      return tfs.length >= 2;
+    } catch {
+      return false;
+    }
+  };
+
+  const tapHardcoded = async (key: string): Promise<boolean> => {
+    const pos = getFlutterElementPosition(key);
+    if (!pos) return false;
+    await driver.action('pointer')
+      .move({ x: pos.x, y: pos.y })
+      .down()
+      .pause(100)
+      .up()
+      .perform();
+    await driver.pause(800);
+    return true;
+  };
+
+  // Try a few times to unwind any mid-game state back to login.
+  for (let i = 0; i < 8; i++) {
+    if (await hasLoginText() || await hasLoginTextFields()) {
+      console.log(`   🧭 Start state: Login screen`);
+      return;
+    }
+
+    if (await hasLobbyText()) {
+      console.log(`   🧭 Start state: Lobby → logging out to reach Login`);
+      await tapHardcoded('logout');
+      continue;
+    }
+
+    // Otherwise assume we're in a game or some nested screen; tap back.
+    console.log(`   🧭 Start state: In-game/other → tapping Back to unwind`);
+    const didBack = await tapHardcoded('back_button') || await tapHardcoded('back');
+    if (!didBack) {
+      // If we can't find hardcoded back position, just stop trying.
+      break;
+    }
+  }
+
+  console.log(`   🧭 Could not confirm Login screen; continuing with spec steps as-is`);
 }
 
 /**
@@ -1296,7 +1377,10 @@ async function executeAppiumAction(
         console.log(`   📍 Tapped via vision at (${visionResult.clickPoint.x}, ${visionResult.clickPoint.y})`);
       } else {
         // Use hardcoded positions
-        const pos = getFlutterElementPosition(targetText);
+        // Prefer targetName (stable ids) over targetText (localized/varies like "PLAY POKER")
+        const pos =
+          getFlutterElementPosition(targetName) ||
+          getFlutterElementPosition(targetText);
         if (pos) {
           // Use 100ms pause between down/up - required for Rive buttons to register
           await driver.action('pointer')
@@ -1736,6 +1820,7 @@ function getFlutterElementPosition(targetName: string): { x: number; y: number }
     'poker_play_button': { x: 310, y: 450 },   // Texas Hold'em PLAY NOW
     'poker_table': { x: 190, y: 770 },         // Poker Table PLAY NOW button (after scroll)
     'poker_table_play_button': { x: 190, y: 770 }, // Poker Table PLAY NOW (after scroll - left card, bottom)
+    'play poker': { x: 190, y: 770 },          // Some builds label the button as "PLAY POKER"
     'logout': { x: 400, y: 95 },               // Logout icon (top right)
     'balance': { x: 320, y: 95 },              // Balance display
     'balance_display': { x: 320, y: 95 },
