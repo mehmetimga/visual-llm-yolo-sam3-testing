@@ -458,10 +458,10 @@ export async function playPokerHand(
     // Detect elements once per loop (used for turn heuristics + logging)
     const detections = await detectPokerElements(screenshotPath, config.detectorUrl);
 
-    // Android: If the DEAL/DEAL AGAIN button is present, ALWAYS click it first.
+    // If the DEAL/DEAL AGAIN button is present, ALWAYS click it first.
     // Reason: YOLO can produce false-positive btn_* detections on an empty table,
     // which would otherwise trick us into thinking action buttons exist.
-    if (isAndroidDriver(driver) && !dealAttemptedThisHand) {
+    if (!dealAttemptedThisHand) {
       try {
         const deal = await driver.$('~deal_button');
         if (await deal.isExisting()) {
@@ -485,6 +485,27 @@ export async function playPokerHand(
           continue;
         }
       } catch {}
+
+      // iOS fallback: DEAL/DEAL AGAIN are standard Flutter buttons (native XCUIElementTypeButton)
+      // and are reliably clickable by label even if accessibility id isn't exposed.
+      if (!isAndroidDriver(driver)) {
+        const labels = ['DEAL AGAIN', 'DEAL', 'Deal Again', 'Deal', 'NEW HAND', 'New Hand'];
+        for (const label of labels) {
+          try {
+            const btn = await driver.$(
+              `//XCUIElementTypeButton[@label="${label}" or @name="${label}" or contains(@label, "${label}") or contains(@name, "${label}")]`
+            );
+            if (await btn.isExisting() && await btn.isDisplayed()) {
+              dealAttemptedThisHand = true;
+              await btn.click();
+              console.log(`   🃏 Clicked ${label} via iOS XPath`);
+              await driver.pause(800);
+              waitCycles = 0;
+              continue;
+            }
+          } catch {}
+        }
+      }
     }
 
     // IMPORTANT: Rive action buttons are NOT exposed as XCUIElementTypeButton.

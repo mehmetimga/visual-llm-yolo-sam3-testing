@@ -1334,6 +1334,31 @@ async function getBootedSimulatorId(): Promise<string | null> {
 }
 
 /**
+ * Helper: Tap an iOS element using W3C pointer actions at its center.
+ * This is more reliable than element.click() for Flutter buttons on iOS.
+ */
+async function tapElementCenterIOS(
+  driver: WebdriverIO.Browser,
+  element: WebdriverIO.Element
+): Promise<boolean> {
+  try {
+    const loc = await element.getLocation();
+    const size = await element.getSize();
+    const cx = Math.round(loc.x + size.width / 2);
+    const cy = Math.round(loc.y + size.height / 2);
+    await driver.action('pointer')
+      .move({ x: cx, y: cy })
+      .down()
+      .pause(100)
+      .up()
+      .perform();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Execute action on iOS simulator via Appium
  */
 async function executeAppiumAction(
@@ -1369,15 +1394,13 @@ async function executeAppiumAction(
         }
       } catch {}
 
-      // PRIORITY: For targets with ambiguous text like "PLAY NOW", use hardcoded position FIRST
-      // This ensures we tap the correct game button, not just any PLAY NOW
-      // Note: poker_table_play_button now uses unique "PLAY POKER" text, so removed from list
+      // PRIORITY: For ambiguous PLAY NOW buttons, use hardcoded position
+      // (poker_table_play_button has unique "PLAY POKER" text so it uses accessibility ID like other buttons)
       const ambiguousTargets = ['poker_play_button', 'slots_play_button', 
                                 'blackjack_play_button', 'roulette_play_button'];
       if (ambiguousTargets.includes(targetName)) {
         const pos = getFlutterElementPosition(targetName);
         if (pos) {
-          // Use 100ms pause between down/up - required for Rive buttons to register
           await driver.action('pointer')
             .move({ x: pos.x, y: pos.y })
             .down()
@@ -1393,15 +1416,32 @@ async function executeAppiumAction(
       let element = null;
       let tapped = false;
 
-      try {
-        // Try accessibility ID (Flutter Key becomes accessibility ID)
-        element = await driver.$(`~${targetName}`);
-        if (await element.isExisting()) {
-          await element.click();
-          console.log(`   ✅ Tapped via accessibility ID: ${targetName}`);
-          tapped = true;
-        }
-      } catch {}
+      // Special handling for poker_table_play_button after scrolling:
+      // The accessibility ID element.click() doesn't work reliably after scroll.
+      // Find by visible label "PLAY POKER" instead for fresh element reference.
+      if (targetName === 'poker_table_play_button') {
+        try {
+          element = await driver.$(`//XCUIElementTypeButton[@label="PLAY POKER"]`);
+          if (await element.isExisting()) {
+            await element.click();
+            console.log(`   ✅ Tapped poker_table_play_button via label: PLAY POKER`);
+            tapped = true;
+          }
+        } catch {}
+      }
+
+      if (!tapped) {
+        try {
+          // Try accessibility ID (Flutter Key becomes accessibility ID)
+          element = await driver.$(`~${targetName}`);
+          if (await element.isExisting()) {
+            // element.click() works well for standard Flutter buttons
+            await element.click();
+            console.log(`   ✅ Tapped via accessibility ID: ${targetName}`);
+            tapped = true;
+          }
+        } catch {}
+      }
 
       if (!tapped) {
         // Try to find by text in label
@@ -1766,6 +1806,8 @@ async function executeAppiumAction(
         .move({ x: startX, y: endY, duration: 300 })
         .up()
         .perform();
+      // Wait for scroll animation to complete and UI to settle
+      await driver.pause(500);
       break;
     }
 
@@ -1932,8 +1974,8 @@ function getFlutterElementPosition(targetName: string): { x: number; y: number }
     'video poker': { x: 310, y: 690 },         // PLAY NOW on Video Poker card
     'texas_holdem': { x: 310, y: 450 },        // Texas Hold'em (after scroll)
     'poker_play_button': { x: 310, y: 450 },   // Texas Hold'em PLAY NOW
-    'poker_table': { x: 190, y: 770 },         // Poker Table PLAY NOW button (after scroll)
-    'poker_table_play_button': { x: 190, y: 770 }, // Poker Table PLAY NOW (after scroll - left card, bottom)
+    'poker_table': { x: 190, y: 770 },         // Poker Table PLAY POKER button (after scroll)
+    'poker_table_play_button': { x: 190, y: 770 }, // Poker Table PLAY POKER (after scroll - left card, bottom)
     'play poker': { x: 190, y: 770 },          // Some builds label the button as "PLAY POKER"
     'logout': { x: 400, y: 95 },               // Logout icon (top right)
     'balance': { x: 320, y: 95 },              // Balance display
