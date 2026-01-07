@@ -111,6 +111,21 @@
       "semanticsLabel": "Deal button"
     }
   },
+  "deal_again_button": {
+    "web": {
+      "name": "deal_again_button",
+      "testId": "deal-again-btn",
+      "role": "button",
+      "text": "DEAL AGAIN",
+      "screen": "Poker Table"
+    },
+    "flutter": {
+      "name": "deal_again_button",
+      "testId": "deal_again_button",
+      "text": "DEAL AGAIN",
+      "semanticsLabel": "Deal again button"
+    }
+  },
   "balance_display": {
     "web": { "name": "balance_display", "testId": "balance-display", "role": "status" },
     "flutter": { "name": "balance_display", "testId": "balance_display", "semanticsLabel": "Balance" }
@@ -118,6 +133,10 @@
   "back_button": {
     "web": { "name": "back_button", "testId": "back-to-lobby", "role": "button", "text": "Back to Lobby" },
     "flutter": { "name": "back_button", "testId": "back_button", "text": "Back" }
+  },
+  "logout_button": {
+    "web": { "name": "logout_button", "testId": "logout-btn", "role": "button", "text": "Logout" },
+    "flutter": { "name": "logout_button", "testId": "logout_button", "text": "Logout", "semanticsLabel": "Logout button" }
   },
   "poker_play_button": {
     "web": { "name": "poker_play_button", "testId": "poker-game", "role": "button", "text": "PLAY NOW" },

@@ -306,12 +306,13 @@ class _PokerTableScreenState extends State<PokerTableScreen>
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         children: [
+          // Expose a stable accessibility id for Appium and keep naming consistent with specs/targets.json
           Semantics(
-            identifier: 'poker_back_button',
-            label: 'poker_back_button',
+            identifier: 'back_button',
+            label: 'back_button',
             button: true,
             child: IconButton(
-              key: const Key('poker_back_button'),
+              key: const Key('back_button'),
               icon: const Icon(Icons.arrow_back_ios, color: Colors.white54, size: 20),
               onPressed: () => Navigator.pop(context),
             ),
@@ -906,19 +907,25 @@ class _PokerTableScreenState extends State<PokerTableScreen>
   // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildDealButton() {
-    return ElevatedButton(
-      onPressed: _startNewHand,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: PokerTheme.gold,
-        foregroundColor: Colors.black,
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-        elevation: 8,
-        shadowColor: PokerTheme.gold.withOpacity(0.5),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      ),
-      child: const Text(
-        'DEAL',
-        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+    return Semantics(
+      identifier: 'deal_button',
+      label: 'deal_button',
+      button: true,
+      child: ElevatedButton(
+        key: const Key('deal_button'),
+        onPressed: _startNewHand,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: PokerTheme.gold,
+          foregroundColor: Colors.black,
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+          elevation: 8,
+          shadowColor: PokerTheme.gold.withOpacity(0.5),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
+        child: const Text(
+          'DEAL',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+        ),
       ),
     );
   }
@@ -983,22 +990,28 @@ class _PokerTableScreenState extends State<PokerTableScreen>
       ),
       child: SizedBox(
         width: double.infinity,
-        child: ElevatedButton(
-          onPressed: _startNewHand,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: PokerTheme.gold,
-            foregroundColor: Colors.black,
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            elevation: 8,
-            shadowColor: PokerTheme.gold.withOpacity(0.4),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          ),
-          child: const Text(
-            'DEAL AGAIN',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.5,
+        child: Semantics(
+          identifier: 'deal_again_button',
+          label: 'deal_again_button',
+          button: true,
+          child: ElevatedButton(
+            key: const Key('deal_again_button'),
+            onPressed: _startNewHand,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: PokerTheme.gold,
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              elevation: 8,
+              shadowColor: PokerTheme.gold.withOpacity(0.4),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            child: const Text(
+              'DEAL AGAIN',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.5,
+              ),
             ),
           ),
         ),

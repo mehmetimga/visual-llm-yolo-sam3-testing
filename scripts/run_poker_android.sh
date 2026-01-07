@@ -19,6 +19,8 @@ echo "  Poker Session Test - Android"
 echo "========================================"
 echo ""
 
+OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}" \
+OLLAMA_VISION_MODEL="${OLLAMA_VISION_MODEL:-minicpm-v:latest}" \
 pnpm run dev \
   --spec "$PROJECT_ROOT/specs/poker_session.feature" \
   --platform flutter \

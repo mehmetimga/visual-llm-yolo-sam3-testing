@@ -679,6 +679,9 @@ async function executeWithAndroid(
     // Wait for app to be ready
     await driver.pause(1000);
 
+    // Ensure we start from the login screen (noReset=true may resume mid-game).
+    await ensureAndroidAtLoginScreen(driver);
+
     for (const step of plan.steps) {
       if (step.platform !== 'flutter') continue;
 
@@ -935,6 +938,10 @@ async function executeAndroidAction(
       }
 
       if (tapped) {
+        // If we just logged out, ensure we really landed on the Login screen.
+        if (targetName.toLowerCase().includes('logout')) {
+          await ensureAndroidAtLoginScreen(driver);
+        }
         break;
       }
 
@@ -992,6 +999,11 @@ async function executeAndroidAction(
         } else {
           throw new Error(`Cannot find element: ${targetText}`);
         }
+      }
+
+      // If we just logged out, ensure we really landed on the Login screen.
+      if (targetName.toLowerCase().includes('logout') || targetText.toLowerCase().includes('logout')) {
+        await ensureAndroidAtLoginScreen(driver);
       }
       break;
     }
@@ -1197,12 +1209,114 @@ async function executeAndroidAction(
       break;
     }
 
+    case 'aiPokerPlay': {
+      const handNumber = (step.meta?.handNumber as number) || 1;
+      const aiConfig: AIPokerConfig = {
+        detectorUrl: config.detectorUrl,
+        ollamaBaseUrl: config.ollamaBaseUrl,
+        ollamaModel: config.ollamaModel,
+      };
+
+      const stepsDir = screenshotPath.substring(0, screenshotPath.lastIndexOf('/'));
+      const result = await playPokerHand(driver, aiConfig, handNumber, stepsDir);
+      if (!result.success) {
+        throw new Error(`AI poker play failed for hand ${handNumber}`);
+      }
+      console.log(`   ✅ AI completed poker hand #${handNumber}: ${result.decision.action.toUpperCase()}`);
+      break;
+    }
+
+    case 'aiPokerPlayMultiple': {
+      const count = (step.meta?.count as number) || 5;
+      const aiConfig: AIPokerConfig = {
+        detectorUrl: config.detectorUrl,
+        ollamaBaseUrl: config.ollamaBaseUrl,
+        ollamaModel: config.ollamaModel,
+      };
+
+      const stepsDir = screenshotPath.substring(0, screenshotPath.lastIndexOf('/'));
+      console.log(`   🎰 AI playing ${count} poker hands...`);
+
+      for (let i = 1; i <= count; i++) {
+        const result = await playPokerHand(driver, aiConfig, i, stepsDir);
+        console.log(`   ✅ Hand #${i}: ${result.decision.action.toUpperCase()} (${result.decision.reasoning})`);
+        await driver.pause(500);
+      }
+      break;
+    }
+
     default:
       console.log(`   ⚠️ Unknown action: ${step.action}`);
   }
 
   // Wait a bit for UI to settle
   await driver.pause(200);
+}
+
+async function ensureAndroidAtLoginScreen(driver: WebdriverIO.Browser): Promise<void> {
+  const hasLogin = async (): Promise<boolean> => {
+    try {
+      // Look for LOG IN button or the two input fields.
+      const loginBtn = await driver.$(`//*[@content-desc="LOG IN" or @text="LOG IN" or @content-desc="Log In" or @text="Log In"]`);
+      if (await loginBtn.isExisting()) return true;
+    } catch {}
+
+    try {
+      const editTexts = await driver.$$('android.widget.EditText');
+      if (editTexts.length >= 2) return true;
+    } catch {}
+
+    return false;
+  };
+
+  const hasLobby = async (): Promise<boolean> => {
+    try {
+      const el = await driver.$(`//*[contains(@content-desc, "Casino Lobby") or contains(@text, "Casino Lobby")]`);
+      return await el.isExisting();
+    } catch {
+      return false;
+    }
+  };
+
+  const tryLogout = async (): Promise<boolean> => {
+    // Prefer new Semantics id if present
+    try {
+      const el = await driver.$('~logout_button');
+      if (await el.isExisting()) {
+        await el.click();
+        await driver.pause(800);
+        return true;
+      }
+    } catch {}
+    return false;
+  };
+
+  // Give navigation a moment to settle.
+  await driver.pause(800);
+
+  // Try a few times: press Android back to unwind any lingering screens.
+  for (let i = 0; i < 6; i++) {
+    if (await hasLogin()) {
+      console.log(`   🧭 End state: Login screen`);
+      return;
+    }
+
+    if (await hasLobby()) {
+      console.log(`   🧭 Start/end state: Lobby → logging out to reach Login`);
+      if (await tryLogout()) continue;
+    }
+
+    // Android back keyevent
+    try {
+      await driver.execute('mobile: shell', {
+        command: 'input',
+        args: ['keyevent', '4'],
+      });
+      await driver.pause(800);
+    } catch {}
+  }
+
+  console.log(`   ⚠️ Could not confirm Login screen after logout (continuing)`);
 }
 
 /**

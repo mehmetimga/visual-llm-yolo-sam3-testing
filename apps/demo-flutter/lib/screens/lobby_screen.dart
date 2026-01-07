@@ -136,14 +136,19 @@ class LobbyScreen extends StatelessWidget {
             ),
           ),
           // Logout Button
-          IconButton(
-            key: const Key('logout_button'),
-            icon: const Icon(Icons.logout, color: Colors.red),
-            onPressed: () {
-              Provider.of<AuthProvider>(context, listen: false).logout();
-              Navigator.pushReplacementNamed(context, '/');
-            },
-            tooltip: 'Logout',
+          Semantics(
+            identifier: 'logout_button',
+            label: 'logout_button',
+            button: true,
+            child: IconButton(
+              key: const Key('logout_button'),
+              icon: const Icon(Icons.logout, color: Colors.red),
+              onPressed: () {
+                Provider.of<AuthProvider>(context, listen: false).logout();
+                Navigator.pushReplacementNamed(context, '/');
+              },
+              tooltip: 'Logout',
+            ),
           ),
         ],
       ),

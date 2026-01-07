@@ -28,6 +28,102 @@ export interface AIPokerConfig {
   ollamaModel: string;
 }
 
+function isAndroidDriver(driver: WebdriverIO.Browser): boolean {
+  const platformName = String((driver as any)?.capabilities?.platformName || '').toLowerCase();
+  return platformName === 'android';
+}
+
+const ANDROID_SCALE = 3.0;
+
+const ANDROID_RIVE_ACTION_POSITIONS: Record<string, { x: number; y: number }> = {
+  // LOGICAL coordinates (must be scaled by ANDROID_SCALE for ADB pixels)
+  btn_check: { x: 57, y: 767 },
+  btn_call: { x: 57, y: 767 },
+  btn_raise: { x: 167, y: 767 },
+  btn_fold: { x: 57, y: 817 },
+  btn_allin: { x: 350, y: 767 },
+};
+
+const ANDROID_FLUTTER_POSITIONS: Record<string, { x: number; y: number }> = {
+  // LOGICAL coordinates (must be scaled by ANDROID_SCALE for ADB pixels)
+  deal: { x: 224, y: 575 },
+  deal_again: { x: 224, y: 920 },
+};
+
+async function tryClickDealAndroid(driver: WebdriverIO.Browser): Promise<boolean> {
+  // First try by accessibility id if Semantics identifier is provided by Flutter
+  try {
+    const el = await driver.$('~deal_button');
+    if (await el.isExisting()) {
+      await el.click();
+      await driver.pause(300);
+      console.log(`   🃏 Clicked DEAL via accessibility id: deal_button`);
+      return true;
+    }
+  } catch {}
+
+  try {
+    const el = await driver.$('~deal_again_button');
+    if (await el.isExisting()) {
+      await el.click();
+      await driver.pause(300);
+      console.log(`   🃏 Clicked DEAL AGAIN via accessibility id: deal_again_button`);
+      return true;
+    }
+  } catch {}
+
+  // First try to click by Android accessibility/text (works if Flutter exposes it)
+  const candidates = [
+    '//*[@content-desc="DEAL" or @text="DEAL"]',
+    '//*[contains(@content-desc, "DEAL") or contains(@text, "DEAL")]',
+    '//*[@content-desc="DEAL AGAIN" or @text="DEAL AGAIN"]',
+    '//*[contains(@content-desc, "DEAL AGAIN") or contains(@text, "DEAL AGAIN")]',
+  ];
+
+  for (const xpath of candidates) {
+    try {
+      const el = await driver.$(xpath);
+      if (await el.isExisting()) {
+        await el.click();
+        await driver.pause(300);
+        console.log(`   🃏 Clicked DEAL via Android selector: ${xpath}`);
+        return true;
+      }
+    } catch {}
+  }
+
+  // Fallback: calibrated ADB tap at the DEAL button area
+  try {
+    console.log(`   🃏 Clicking DEAL via Android hardcoded position (${ANDROID_FLUTTER_POSITIONS.deal.x}, ${ANDROID_FLUTTER_POSITIONS.deal.y})`);
+    await tapAt(driver, ANDROID_FLUTTER_POSITIONS.deal.x, ANDROID_FLUTTER_POSITIONS.deal.y);
+    return true;
+  } catch {}
+
+  return false;
+}
+
+async function tapAt(driver: WebdriverIO.Browser, x: number, y: number): Promise<void> {
+  if (isAndroidDriver(driver)) {
+    const px = Math.round(x * ANDROID_SCALE);
+    const py = Math.round(y * ANDROID_SCALE);
+    await driver.execute('mobile: shell', {
+      command: 'input',
+      args: ['tap', px.toString(), py.toString()],
+    });
+    await driver.pause(150);
+    return;
+  }
+
+  // iOS: W3C pointer with pause is required for Rive hit-testing
+  await driver.action('pointer')
+    .move({ x, y })
+    .down()
+    .pause(100)
+    .up()
+    .perform();
+  await driver.pause(150);
+}
+
 /**
  * Analyze the poker game screenshot and decide what action to take
  */
@@ -107,10 +203,15 @@ function hasRiveActionButtonsFromDetections(detections: DetectedElement[]): bool
   return detections.some((d) => {
     const t = (d.type || '').toLowerCase();
     if (!t.startsWith('btn_')) return false;
+    if (t === 'btn_deal') return false; // deal is not an action decision button
     const conf = d.confidence ?? 0;
     // Keep this permissive; our model is high-confidence on Rive buttons.
     return conf >= 0.3;
   });
+}
+
+function hasDealButtonFromDetections(detections: DetectedElement[]): boolean {
+  return detections.some((d) => (d.type || '').toLowerCase() === 'btn_deal' && (d.confidence ?? 0) >= 0.3);
 }
 
 /**
@@ -339,15 +440,6 @@ export async function playPokerHand(
   // Quick settle - no long waits needed
   await driver.pause(200);
   
-  // First, check if we need to click DEAL or DEAL AGAIN button (new hand)
-  const dealClicked = await clickDealButton(driver);
-  if (dealClicked) {
-    await driver.pause(800);  // Brief wait for cards to be dealt
-  } else {
-    // If we're resuming with noReset, we might already be mid-hand (action buttons visible).
-    console.log(`   🟡 No DEAL/DEAL AGAIN button visible — likely already in an active hand. Continuing...`);
-  }
-  
   let lastDecision: PokerDecision = { action: 'check', reasoning: 'Initial', confidence: 0 };
   let roundNumber = 1;
   const maxRoundsPerHand = 5;  // Safety limit for betting rounds
@@ -355,6 +447,7 @@ export async function playPokerHand(
   // Keep playing until hand is complete or we hit max rounds
   let waitCycles = 0;
   const maxWaitCycles = 60;  // Max time waiting for our turn (60 * 0.5s = 30s)
+  let dealAttemptedThisHand = false;
   
   while (roundNumber <= maxRoundsPerHand && waitCycles < maxWaitCycles) {
     // Take screenshot of current game state
@@ -364,45 +457,87 @@ export async function playPokerHand(
 
     // Detect elements once per loop (used for turn heuristics + logging)
     const detections = await detectPokerElements(screenshotPath, config.detectorUrl);
-    
-    // Check if we see DEAL AGAIN button (hand is over)
-    const handEnded = await isHandComplete(driver);
-    if (handEnded) {
-      console.log(`   🏆 Hand #${handNumber} complete!`);
-      break;
+
+    // Android: If the DEAL/DEAL AGAIN button is present, ALWAYS click it first.
+    // Reason: YOLO can produce false-positive btn_* detections on an empty table,
+    // which would otherwise trick us into thinking action buttons exist.
+    if (isAndroidDriver(driver) && !dealAttemptedThisHand) {
+      try {
+        const deal = await driver.$('~deal_button');
+        if (await deal.isExisting()) {
+          dealAttemptedThisHand = true;
+          await deal.click();
+          console.log(`   🃏 Clicked DEAL via accessibility id: deal_button`);
+          await driver.pause(800);
+          waitCycles = 0;
+          continue;
+        }
+      } catch {}
+
+      try {
+        const dealAgain = await driver.$('~deal_again_button');
+        if (await dealAgain.isExisting()) {
+          dealAttemptedThisHand = true;
+          await dealAgain.click();
+          console.log(`   🃏 Clicked DEAL AGAIN via accessibility id: deal_again_button`);
+          await driver.pause(800);
+          waitCycles = 0;
+          continue;
+        }
+      } catch {}
     }
-    
-    // Check if waiting for other players (buttons disabled or "Thinking..." visible)
-    const waitingForOthers = await isWaitingForOtherPlayers(driver);
-    if (waitingForOthers) {
-      if (waitCycles === 0) {
-        console.log(`   ⏳ Waiting for other players...`);
-      } else if (waitCycles % 10 === 0) {
-        console.log(`   ⏳ Still waiting... (${waitCycles * 0.5}s)`);
-      }
-      await driver.pause(500);  // Short poll interval when waiting
-      waitCycles++;
-      continue;
-    }
-    
-    // Reset wait counter when it's our turn
-    waitCycles = 0;
-    
+
     // IMPORTANT: Rive action buttons are NOT exposed as XCUIElementTypeButton.
     // Use YOLO detections (btn_call/btn_raise/...) to decide whether actions are available.
     const hasActionButtons = hasRiveActionButtonsFromDetections(detections);
-    if (!hasActionButtons) {
-      console.log(`   ⏳ No action buttons available, waiting...`);
-      await driver.pause(300);  // Quick check
-      
-      // Check again if hand ended
-      if (await isHandComplete(driver)) {
-        console.log(`   🏆 Hand #${handNumber} complete!`);
-        break;
+
+    // If DEAL/DEAL AGAIN is visible, click it when there are no action buttons (not in-hand yet / hand ended)
+    if (!hasActionButtons && hasDealButtonFromDetections(detections)) {
+      console.log(`   🃏 DEAL available (btn_deal detected) — clicking to (re)start hand...`);
+      if (isAndroidDriver(driver)) {
+        // Best-effort: tap standard Android deal button area
+        await tapAt(driver, ANDROID_FLUTTER_POSITIONS.deal.x, ANDROID_FLUTTER_POSITIONS.deal.y);
+      } else {
+        const vision = await visionFallback(screenshotPath, 'DEAL', {
+          detectorUrl: config.detectorUrl,
+          ollamaBaseUrl: config.ollamaBaseUrl,
+          ollamaModel: config.ollamaModel,
+        });
+        if (vision.success && vision.clickPoint) {
+          await tapAt(driver, vision.clickPoint.x, vision.clickPoint.y);
+        } else {
+          // Fallback to iOS hardcoded deal pos via visionHelper hardcoded map
+          await tapAt(driver, 215, 575);
+        }
       }
-      
+      await driver.pause(800);
+      waitCycles = 0;
       continue;
     }
+
+    if (!hasActionButtons) {
+      // Common Android case: DEAL is visible but the detector doesn't return btn_deal.
+      // In that case, proactively click DEAL once at the start of the hand instead of waiting forever.
+      if (isAndroidDriver(driver) && !dealAttemptedThisHand && roundNumber === 1) {
+        dealAttemptedThisHand = true;
+        const clicked = await tryClickDealAndroid(driver);
+        if (clicked) {
+          await driver.pause(800);
+          waitCycles = 0;
+          continue;
+        }
+      }
+
+      // Waiting for other players / animation / not our turn
+      if (waitCycles === 0) console.log(`   ⏳ Waiting for other players...`);
+      else if (waitCycles % 10 === 0) console.log(`   ⏳ Still waiting... (${waitCycles * 0.5}s)`);
+      await driver.pause(500);
+      waitCycles++;
+      continue;
+    }
+
+    // Reset wait counter when we have action buttons
+    waitCycles = 0;
     
     // Get AI decision
     console.log(`   📍 Round ${roundNumber} of hand #${handNumber}`);
@@ -422,40 +557,7 @@ export async function playPokerHand(
     console.log(`   ⚠️ Timeout waiting for turn in hand #${handNumber}`);
   }
   
-  // After hand completes, click DEAL AGAIN to start next hand
-  await driver.pause(300);
-  const dealtAgain = await clickDealButton(driver);
-  if (dealtAgain) {
-    console.log(`   🔄 Starting next hand...`);
-  }
-  
   return { success: true, decision: lastDecision };
-}
-
-/**
- * Check if the hand is complete (DEAL AGAIN button visible)
- */
-async function isHandComplete(driver: WebdriverIO.Browser): Promise<boolean> {
-  const dealAgainLabels = ['DEAL AGAIN', 'Deal Again', 'NEW HAND', 'New Hand', 'NEXT HAND'];
-  
-  for (const label of dealAgainLabels) {
-    try {
-      const button = await driver.$(`//XCUIElementTypeButton[contains(@label, "${label}") or contains(@name, "${label}")]`);
-      if (await button.isExisting() && await button.isDisplayed()) {
-        return true;
-      }
-    } catch {}
-  }
-  
-  // Also check for winner announcement text
-  try {
-    const winnerText = await driver.$(`//*[contains(@label, "wins") or contains(@label, "WIN") or contains(@label, "WINNER")]`);
-    if (await winnerText.isExisting()) {
-      return true;
-    }
-  } catch {}
-  
-  return false;
 }
 
 /**
@@ -482,65 +584,6 @@ async function hasPokerActionButtons(driver: WebdriverIO.Browser): Promise<boole
 }
 
 /**
- * Check if "Thinking..." indicator is visible (means it's not our turn)
- */
-async function isWaitingForOtherPlayers(driver: WebdriverIO.Browser): Promise<boolean> {
-  try {
-    // Check for "Thinking..." text
-    const thinking = await driver.$(`//*[contains(@label, "Thinking") or contains(@label, "thinking")]`);
-    if (await thinking.isExisting() && await thinking.isDisplayed()) {
-      return true;
-    }
-  } catch {}
-  
-  // Also check if buttons exist but are disabled
-  const actionLabels = ['FOLD', 'CHECK', 'CALL', 'RAISE'];
-  for (const label of actionLabels) {
-    try {
-      const button = await driver.$(`//XCUIElementTypeButton[contains(@label, "${label}")]`);
-      if (await button.isExisting() && await button.isDisplayed()) {
-        const isEnabled = await button.isEnabled();
-        if (!isEnabled) {
-          return true;  // Buttons exist but disabled = waiting
-        }
-      }
-    } catch {}
-  }
-  
-  return false;
-}
-
-/**
- * Click DEAL or DEAL AGAIN button if visible
- */
-async function clickDealButton(driver: WebdriverIO.Browser): Promise<boolean> {
-  const dealLabels = ['DEAL AGAIN', 'DEAL', 'Deal Again', 'Deal', 'NEW HAND', 'New Hand'];
-  
-  for (const label of dealLabels) {
-    try {
-      const button = await driver.$(`//XCUIElementTypeButton[contains(@label, "${label}") or contains(@name, "${label}")]`);
-      if (await button.isExisting() && await button.isDisplayed()) {
-        console.log(`   🃏 Clicking ${label} to start new hand...`);
-        await button.click();
-        return true;
-      }
-    } catch {}
-  }
-  
-  // Try by text content
-  try {
-    const button = await driver.$(`//*[contains(@label, "DEAL") or contains(@name, "DEAL")]`);
-    if (await button.isExisting() && await button.isDisplayed()) {
-      console.log(`   🃏 Clicking DEAL button...`);
-      await button.click();
-      return true;
-    }
-  } catch {}
-  
-  return false;
-}
-
-/**
  * Execute the poker action by clicking the appropriate button
  */
 async function executePokerAction(
@@ -549,8 +592,6 @@ async function executePokerAction(
   screenshotPath: string,
   config: AIPokerConfig
 ): Promise<{ success: boolean; decision: PokerDecision }> {
-  // Use vision helper (YOLO-first) so we can click Rive canvas reliably
-  // (it maps btn_* types to calibrated clickable positions).
   const targetText =
     decision.action === 'all_in' ? 'ALL IN' :
     decision.action === 'raise' ? 'RAISE' :
@@ -558,6 +599,22 @@ async function executePokerAction(
     decision.action === 'fold' ? 'FOLD' :
     'CHECK';
 
+  // Android: use calibrated logical positions + ADB tap for reliability
+  if (isAndroidDriver(driver)) {
+    const key =
+      decision.action === 'all_in' ? 'btn_allin' :
+      decision.action === 'raise' ? 'btn_raise' :
+      decision.action === 'call' ? 'btn_call' :
+      decision.action === 'fold' ? 'btn_fold' :
+      'btn_check';
+
+    const pos = ANDROID_RIVE_ACTION_POSITIONS[key] || ANDROID_RIVE_ACTION_POSITIONS.btn_call;
+    console.log(`   🎯 Android tap ${targetText} via calibrated ${key} at (${pos.x}, ${pos.y})`);
+    await tapAt(driver, pos.x, pos.y);
+    return { success: true, decision };
+  }
+
+  // iOS: use vision helper (YOLO-first) which maps btn_* → calibrated iOS positions.
   const visionResult = await visionFallback(screenshotPath, targetText, {
     detectorUrl: config.detectorUrl,
     ollamaBaseUrl: config.ollamaBaseUrl,
@@ -567,27 +624,14 @@ async function executePokerAction(
   if (visionResult.success && visionResult.clickPoint) {
     const { x, y } = visionResult.clickPoint;
     console.log(`   🎯 Tapping ${targetText} at (${x}, ${y}) via YOLO/VLM`);
-    await driver.action('pointer')
-      .move({ x, y })
-      .down()
-      .pause(100) // crucial for Rive
-      .up()
-      .perform();
-    await driver.pause(300);
+    await tapAt(driver, x, y);
     return { success: true, decision };
   }
 
-  // Final fallback: calibrated positions (still with the 100ms pause)
+  // Final fallback: calibrated iOS positions
   const pos = getActionButtonPosition(decision.action);
   console.log(`   ⚡ Fallback tap ${targetText} at (${pos.x}, ${pos.y})`);
-  await driver.action('pointer')
-    .move({ x: pos.x, y: pos.y })
-    .down()
-    .pause(100)
-    .up()
-    .perform();
-
-  await driver.pause(300);
+  await tapAt(driver, pos.x, pos.y);
   return { success: true, decision };
 }
 
